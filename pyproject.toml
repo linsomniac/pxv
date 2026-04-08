@@ -1,0 +1,34 @@
+[project]
+name = "pxv"
+version = "0.1.0"
+description = "A Python clone of the classic Unix xv image viewer"
+authors = [
+    { name = "Sean Reifschneider", email = "sean@realgo.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pillow>=12.0",
+]
+
+[project.scripts]
+pxv = "pxv:main"
+
+[build-system]
+requires = ["uv_build>=0.11.1,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 99
+
+[tool.mypy]
+strict = true
+
+[[tool.mypy.overrides]]
+module = "PIL.*"
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.0",
+    "ruff>=0.15.9",
+]
