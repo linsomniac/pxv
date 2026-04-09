@@ -1,8 +1,9 @@
 """Three-tier image state model: original -> working -> display.
 
 AIDEV-NOTE: original_image preserves the true loaded image (including alpha/mode).
-working_image is always RGB, mutated by destructive ops (crop, rotate, flip, resize).
-_save_alpha tracks the alpha channel through geometry ops so it can be re-attached on save.
+working_image is always RGB (composited onto white for display), mutated by destructive ops.
+_save_rgba keeps the true RGBA pixel values through geometry ops so that semi-transparent
+pixels survive round-trip save. Enhancements are applied to _save_rgba's RGB channels on save.
 Display image is computed on-the-fly: scale working to display size, then apply enhancements.
 """
 
@@ -22,8 +23,8 @@ class ImageModel:
         self.original_image: Image.Image | None = None
         self.working_image: Image.Image | None = None
         self._current_path: Path | None = None
-        self._original_alpha: Image.Image | None = None
-        self._save_alpha: Image.Image | None = None
+        self._original_rgba: Image.Image | None = None
+        self._save_rgba: Image.Image | None = None
 
     @property
     def current_path(self) -> Path | None:
@@ -45,6 +46,15 @@ class ImageModel:
             return img.convert("RGB")
         return img.copy()
 
+    @staticmethod
+    def _has_transparency(img: Image.Image) -> bool:
+        """Check if an image has transparency (alpha band or palette transparency)."""
+        if img.mode in ("RGBA", "LA", "PA"):
+            return True
+        if img.mode == "P" and "transparency" in img.info:
+            return True
+        return False
+
     def load(self, path: Path) -> None:
         """Load an image from disk. Handles EXIF orientation and mode conversion."""
         raw = Image.open(path)
@@ -57,12 +67,16 @@ class ImageModel:
         # working_image is always RGB for the enhancement pipeline.
         self.original_image = img.copy()
 
-        if img.mode == "RGBA":
-            self._original_alpha = img.split()[3].copy()
-            self._save_alpha = self._original_alpha.copy()
+        # AIDEV-NOTE: Normalize any transparent image (RGBA, LA, palette+transparency)
+        # to RGBA for the save buffer. This ensures semi-transparent RGB values survive
+        # round-trip saves instead of being corrupted by white-compositing.
+        if self._has_transparency(img):
+            rgba = img.convert("RGBA")
+            self._original_rgba = rgba.copy()
+            self._save_rgba = rgba.copy()
         else:
-            self._original_alpha = None
-            self._save_alpha = None
+            self._original_rgba = None
+            self._save_rgba = None
 
         self.working_image = self._to_rgb_working(img)
         self._current_path = path
@@ -72,8 +86,8 @@ class ImageModel:
         if self.working_image is None:
             return
         self.working_image = self.working_image.crop(box)
-        if self._save_alpha is not None:
-            self._save_alpha = self._save_alpha.crop(box)
+        if self._save_rgba is not None:
+            self._save_rgba = self._save_rgba.crop(box)
 
     def rotate(self, degrees: int) -> None:
         """Rotate working image by 90, 180, or 270 degrees."""
@@ -87,36 +101,36 @@ class ImageModel:
         method = transpose_map.get(degrees)
         if method is not None:
             self.working_image = self.working_image.transpose(method)
-            if self._save_alpha is not None:
-                self._save_alpha = self._save_alpha.transpose(method)
+            if self._save_rgba is not None:
+                self._save_rgba = self._save_rgba.transpose(method)
 
     def flip_horizontal(self) -> None:
         if self.working_image is None:
             return
         self.working_image = self.working_image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        if self._save_alpha is not None:
-            self._save_alpha = self._save_alpha.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        if self._save_rgba is not None:
+            self._save_rgba = self._save_rgba.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
 
     def flip_vertical(self) -> None:
         if self.working_image is None:
             return
         self.working_image = self.working_image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-        if self._save_alpha is not None:
-            self._save_alpha = self._save_alpha.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        if self._save_rgba is not None:
+            self._save_rgba = self._save_rgba.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
     def resize(self, new_size: tuple[int, int]) -> None:
         if self.working_image is None:
             return
         self.working_image = self.working_image.resize(new_size, Image.Resampling.LANCZOS)
-        if self._save_alpha is not None:
-            self._save_alpha = self._save_alpha.resize(new_size, Image.Resampling.LANCZOS)
+        if self._save_rgba is not None:
+            self._save_rgba = self._save_rgba.resize(new_size, Image.Resampling.LANCZOS)
 
     def reset(self) -> None:
         """Reset working image to original (undo all destructive ops)."""
         if self.original_image is not None:
             self.working_image = self._to_rgb_working(self.original_image)
-            self._save_alpha = (
-                self._original_alpha.copy() if self._original_alpha is not None else None
+            self._save_rgba = (
+                self._original_rgba.copy() if self._original_rgba is not None else None
             )
 
     def get_working_size(self) -> tuple[int, int]:
@@ -160,13 +174,17 @@ class ImageModel:
     ) -> Image.Image | None:
         """Get the full-resolution enhanced image for saving.
 
-        AIDEV-NOTE: When preserve_alpha is True and the original had an alpha
-        channel, we re-attach it after applying enhancements to the RGB working
-        image. Enhancements only affect RGB; alpha passes through unchanged.
+        AIDEV-NOTE: When preserve_alpha is True and _save_rgba exists, we enhance
+        the true RGBA RGB channels (not the white-composited working_image) so that
+        semi-transparent pixels like (255,0,0,128) round-trip faithfully instead of
+        becoming (255,127,127,128) from white fringing.
         """
         if self.working_image is None:
             return None
-        enhanced = apply_enhancements(self.working_image, params)
-        if preserve_alpha and self._save_alpha is not None:
-            enhanced.putalpha(self._save_alpha)
-        return enhanced
+        if preserve_alpha and self._save_rgba is not None:
+            r, g, b, a = self._save_rgba.split()
+            rgb = Image.merge("RGB", (r, g, b))
+            enhanced_rgb = apply_enhancements(rgb, params)
+            enhanced_rgb.putalpha(a)
+            return enhanced_rgb
+        return apply_enhancements(self.working_image, params)
