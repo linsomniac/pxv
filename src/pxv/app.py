@@ -41,6 +41,9 @@ class PxvApp:
 
         # Debounce for configure events
         self._configure_after_id: str | None = None
+        # AIDEV-NOTE: Guard flag to prevent <Configure> feedback loop when we
+        # programmatically resize the window to match the image.
+        self._resizing_programmatically = False
 
         self._bind_keys()
         self._bind_configure()
@@ -64,6 +67,8 @@ class PxvApp:
         self.canvas_view.canvas.bind("<Configure>", self._on_configure)
 
     def _on_configure(self, _event: tk.Event) -> None:
+        if self._resizing_programmatically:
+            return
         if self._configure_after_id is not None:
             self.root.after_cancel(self._configure_after_id)
         self._configure_after_id = self.root.after(50, self._handle_resize)
@@ -94,12 +99,13 @@ class PxvApp:
             self.enhancement_dialog.sync_sliders_from_params()
         self.canvas_view.clear_selection()
 
-        # Fit to window on load
-        self.root.update_idletasks()
-        canvas_w = self.canvas_view.canvas.winfo_width()
-        canvas_h = self.canvas_view.canvas.winfo_height()
+        # Fit to screen on load
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        max_w = int(screen_w * 0.95)
+        max_h = int(screen_h * 0.90)
         img_size = self.image_model.get_working_size()
-        self.canvas_view.zoom_fit(img_size, (canvas_w, canvas_h))
+        self.canvas_view.zoom_fit(img_size, (max_w, max_h))
 
         self.refresh_display()
 
@@ -110,12 +116,34 @@ class PxvApp:
             params=self.enhancement_params,
         )
         if display_img is not None:
+            # AIDEV-NOTE: Resize window BEFORE display() so the canvas has correct
+            # dimensions when centering the image.
+            self._resize_window_to_image(display_img.width, display_img.height)
             self.canvas_view.display(display_img)
         self._update_title()
 
+    def _resize_window_to_image(self, img_w: int, img_h: int) -> None:
+        """Resize the window to fit the displayed image, capped at screen bounds."""
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        max_w = int(screen_w * 0.95)
+        max_h = int(screen_h * 0.90)
+        win_w = min(img_w, max_w)
+        win_h = min(img_h, max_h)
+        self._resizing_programmatically = True
+        self.root.geometry(f"{win_w}x{win_h}")
+        self.root.update_idletasks()
+        self._resizing_programmatically = False
+
     def _update_display(self) -> None:
-        """Refresh display without changing zoom (used for resize events)."""
-        self.refresh_display()
+        """Refresh display without changing zoom or window size (for resize events)."""
+        display_img = self.image_model.get_display_image(
+            zoom=self.canvas_view.zoom,
+            params=self.enhancement_params,
+        )
+        if display_img is not None:
+            self.canvas_view.display(display_img)
+        self._update_title()
 
     def _update_title(self) -> None:
         path = self.image_model.current_path
@@ -135,7 +163,7 @@ def main() -> None:
     parser.add_argument("paths", nargs="*", help="Image files or directories to open")
     args = parser.parse_args()
 
-    root = tk.Tk()
+    root = tk.Tk(className="pxv")
     root.title("pxv")
     root.configure(bg="black")
 
