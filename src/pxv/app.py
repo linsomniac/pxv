@@ -7,6 +7,8 @@ of which widget has focus. The enhancement dialog binds its own widget-level eve
 from __future__ import annotations
 
 import argparse
+import re
+import subprocess
 import tkinter as tk
 from typing import TYPE_CHECKING
 
@@ -19,6 +21,54 @@ from pxv.image_model import ImageModel
 
 if TYPE_CHECKING:
     from pxv.enhancement_dialog import EnhancementDialog
+
+
+# AIDEV-NOTE: Tkinter's winfo_screenwidth/height returns the total virtual desktop
+# across all monitors. These helpers use xrandr to detect individual monitor
+# geometry so windows don't span multiple displays.
+
+_cached_monitors: list[tuple[int, int, int, int]] | None = None
+
+
+def _parse_monitors() -> list[tuple[int, int, int, int]]:
+    """Parse xrandr output to get connected monitor geometries.
+
+    Returns list of (width, height, x_offset, y_offset) tuples.
+    Result is cached for the process lifetime.
+    """
+    global _cached_monitors
+    if _cached_monitors is not None:
+        return _cached_monitors
+    try:
+        output = subprocess.check_output(
+            ["xrandr"], text=True, timeout=5, stderr=subprocess.DEVNULL
+        )
+        pattern = r"\bconnected\s+(?:primary\s+)?(\d+)x(\d+)\+(\d+)\+(\d+)"
+        _cached_monitors = [
+            (int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)))
+            for m in re.finditer(pattern, output)
+        ]
+    except Exception:
+        _cached_monitors = []
+    return _cached_monitors
+
+
+def _get_monitor_size(root: tk.Tk) -> tuple[int, int]:
+    """Get pixel dimensions of the monitor containing the window's center.
+
+    Falls back to winfo_screenwidth/height if xrandr is unavailable.
+    """
+    monitors = _parse_monitors()
+    if monitors:
+        root.update_idletasks()
+        cx = root.winfo_x() + root.winfo_width() // 2
+        cy = root.winfo_y() + root.winfo_height() // 2
+        for mw, mh, mx, my in monitors:
+            if mx <= cx < mx + mw and my <= cy < my + mh:
+                return (mw, mh)
+        # Window center not in any monitor — use first
+        return (monitors[0][0], monitors[0][1])
+    return (root.winfo_screenwidth(), root.winfo_screenheight())
 
 
 class PxvApp:
@@ -44,9 +94,33 @@ class PxvApp:
         # AIDEV-NOTE: Guard flag to prevent <Configure> feedback loop when we
         # programmatically resize the window to match the image.
         self._resizing_programmatically = False
+        self._deco_size: tuple[int, int] | None = None
 
         self._bind_keys()
         self._bind_configure()
+
+    def _get_decoration_size(self) -> tuple[int, int]:
+        """Measure window decoration overhead (borders + title bar).
+
+        Caches the result after first successful measurement.
+        Returns conservative defaults if the window isn't mapped yet.
+        """
+        if self._deco_size is not None:
+            return self._deco_size
+        self.root.update_idletasks()
+        border = self.root.winfo_rootx() - self.root.winfo_x()
+        titlebar = self.root.winfo_rooty() - self.root.winfo_y()
+        if border > 0 or titlebar > 0:
+            self._deco_size = (border * 2, titlebar + border)
+            return self._deco_size
+        # Conservative defaults for typical Linux WMs
+        return (8, 48)
+
+    def _get_max_image_size(self) -> tuple[int, int]:
+        """Maximum image display size that fits on the current monitor."""
+        mon_w, mon_h = _get_monitor_size(self.root)
+        deco_w, deco_h = self._get_decoration_size()
+        return (mon_w - deco_w, mon_h - deco_h)
 
     def _bind_keys(self) -> None:
         self.root.bind("<Key-q>", lambda _: commands.cmd_quit(self))
@@ -99,11 +173,8 @@ class PxvApp:
             self.enhancement_dialog.sync_sliders_from_params()
         self.canvas_view.clear_selection()
 
-        # Fit to screen on load
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        max_w = int(screen_w * 0.95)
-        max_h = int(screen_h * 0.90)
+        # Fit to current monitor on load
+        max_w, max_h = self._get_max_image_size()
         img_size = self.image_model.get_working_size()
         self.canvas_view.zoom_fit(img_size, (max_w, max_h))
 
@@ -123,11 +194,8 @@ class PxvApp:
         self._update_title()
 
     def _resize_window_to_image(self, img_w: int, img_h: int) -> None:
-        """Resize the window to fit the displayed image, capped at screen bounds."""
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        max_w = int(screen_w * 0.95)
-        max_h = int(screen_h * 0.90)
+        """Resize the window to fit the displayed image, capped at monitor bounds."""
+        max_w, max_h = self._get_max_image_size()
         win_w = min(img_w, max_w)
         win_h = min(img_h, max_h)
         self._resizing_programmatically = True
@@ -167,11 +235,10 @@ def main() -> None:
     root.title("pxv")
     root.configure(bg="black")
 
-    # Set initial window size — 90% of screen, capped at reasonable max
-    screen_w = root.winfo_screenwidth()
-    screen_h = root.winfo_screenheight()
-    win_w = min(int(screen_w * 0.75), 1200)
-    win_h = min(int(screen_h * 0.75), 900)
+    # Set initial window size — 75% of current monitor, capped at reasonable max
+    mon_w, mon_h = _get_monitor_size(root)
+    win_w = min(int(mon_w * 0.75), 1200)
+    win_h = min(int(mon_h * 0.75), 900)
     root.geometry(f"{win_w}x{win_h}")
 
     paths = expand_paths(args.paths)
