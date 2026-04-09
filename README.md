@@ -8,13 +8,13 @@ the classic Unix [xv](http://www.trilon.com/xv/) image viewer.
 Run directly from the GitHub repo (requires [uv](https://docs.astral.sh/uv/)):
 
 ```sh
-uvx --from git+https://github.com/seanreifschneider/pxv pxv photo.jpg
+uvx --from git+https://github.com/linsomniac/pxv pxv photo.jpg
 ```
 
 Or install locally:
 
 ```sh
-uv pip install git+https://github.com/seanreifschneider/pxv
+uv pip install git+https://github.com/linsomniac/pxv
 pxv photo.jpg
 ```
 
@@ -71,7 +71,7 @@ The enhancement dialog (`e`) provides real-time adjustment of:
 ## Development
 
 ```sh
-git clone https://github.com/seanreifschneider/pxv
+git clone https://github.com/linsomniac/pxv
 cd pxv
 uv sync
 uv run pxv test_images/
