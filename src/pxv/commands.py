@@ -37,6 +37,8 @@ _FORMAT_MAP = {
     ".gif": "GIF",
 }
 
+_ALPHA_FORMATS = {"PNG", "WEBP", "TIFF"}
+
 _OPEN_FILETYPES = [
     ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp *.ppm *.pgm *.pbm *.ico"),
     ("All files", "*.*"),
@@ -63,8 +65,7 @@ def cmd_open(app: PxvApp) -> None:
 
 def cmd_save_as(app: PxvApp) -> None:
     """Save the enhanced image via Save As dialog."""
-    save_img = app.image_model.get_save_image(app.enhancement_params)
-    if save_img is None:
+    if app.image_model.working_image is None:
         return
 
     initial_dir = None
@@ -87,6 +88,12 @@ def cmd_save_as(app: PxvApp) -> None:
     save_kwargs: dict[str, object] = {}
     if fmt == "JPEG":
         save_kwargs["quality"] = 95
+
+    save_img = app.image_model.get_save_image(
+        app.enhancement_params, preserve_alpha=fmt in _ALPHA_FORMATS
+    )
+    if save_img is None:
+        return
 
     try:
         save_img.save(path, format=fmt, **save_kwargs)
@@ -116,6 +123,7 @@ def cmd_resize(app: PxvApp) -> None:
     new_size = resize_dialog(app.root, current_size)
     if new_size is not None:
         app.image_model.resize(new_size)
+        app.canvas_view.clear_selection()
         app.refresh_display()
 
 
@@ -123,6 +131,7 @@ def cmd_reset(app: PxvApp) -> None:
     """Reset to original image and clear enhancements."""
     app.image_model.reset()
     app.enhancement_params.reset()
+    app.canvas_view.clear_selection()
     if app.enhancement_dialog is not None:
         app.enhancement_dialog.sync_sliders_from_params()
     app.refresh_display()
@@ -137,11 +146,13 @@ def cmd_rotate(app: PxvApp, degrees: int) -> None:
 
 def cmd_flip_horizontal(app: PxvApp) -> None:
     app.image_model.flip_horizontal()
+    app.canvas_view.clear_selection()
     app.refresh_display()
 
 
 def cmd_flip_vertical(app: PxvApp) -> None:
     app.image_model.flip_vertical()
+    app.canvas_view.clear_selection()
     app.refresh_display()
 
 
@@ -176,15 +187,22 @@ def cmd_print(app: PxvApp) -> None:
         return
 
     if sys.platform == "linux":
+        # AIDEV-NOTE: lpr copies the file into the CUPS spool, so it's safe to
+        # unlink immediately after subprocess.run returns.
+        tmp_path: str | None = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-                save_img.save(f.name, format="PNG")
-                subprocess.run(["lpr", f.name], check=True)
-                messagebox.showinfo("Print", "Image sent to default printer.")
+                tmp_path = f.name
+                save_img.save(tmp_path, format="PNG")
+            subprocess.run(["lpr", tmp_path], check=True)
+            messagebox.showinfo("Print", "Image sent to default printer.")
         except FileNotFoundError:
             messagebox.showerror("Print Error", "lpr command not found. Install CUPS.")
         except subprocess.CalledProcessError as e:
             messagebox.showerror("Print Error", f"Print failed:\n{e}")
+        finally:
+            if tmp_path is not None:
+                Path(tmp_path).unlink(missing_ok=True)
     else:
         messagebox.showinfo("Print", "Printing is only supported on Linux via lpr.")
 

@@ -109,8 +109,16 @@ def _apply_hue_rotation(img: Image.Image, offset: int) -> Image.Image:
     return result.convert("RGB")
 
 
-def apply_enhancements(img: Image.Image, params: EnhancementParams) -> Image.Image:
-    """Apply the full enhancement pipeline to an image. Returns a new image."""
+def apply_enhancements(
+    img: Image.Image, params: EnhancementParams, *, zoom: float = 1.0
+) -> Image.Image:
+    """Apply the full enhancement pipeline to an image. Returns a new image.
+
+    AIDEV-NOTE: zoom scales the blur radius so that preview (scale-then-enhance)
+    matches save (enhance at full res). At 50% zoom the image has half the pixels,
+    so halving the radius produces an equivalent visual blur. Sharpen uses a fixed
+    3x3 kernel and does not need scaling.
+    """
     if params.is_identity():
         return img.copy()
 
@@ -142,9 +150,11 @@ def apply_enhancements(img: Image.Image, params: EnhancementParams) -> Image.Ima
         )
         result = result.point(lut)
 
-    # 5. Blur
+    # 5. Blur (radius scaled by zoom for preview parity)
     if params.blur > 0.0:
-        result = result.filter(ImageFilter.GaussianBlur(radius=params.blur))
+        effective_radius = params.blur * zoom
+        if effective_radius > 0.01:
+            result = result.filter(ImageFilter.GaussianBlur(radius=effective_radius))
 
     # 6. Sharpen
     if params.sharpen != 1.0:
