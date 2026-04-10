@@ -25,6 +25,9 @@ class ImageModel:
         self._current_path: Path | None = None
         self._original_rgba: Image.Image | None = None
         self._save_rgba: Image.Image | None = None
+        # AIDEV-NOTE: Pre-crop state for uncrop (one level of undo)
+        self._pre_crop_working: Image.Image | None = None
+        self._pre_crop_rgba: Image.Image | None = None
 
     @property
     def current_path(self) -> Path | None:
@@ -82,12 +85,28 @@ class ImageModel:
         self._current_path = path
 
     def crop(self, box: tuple[int, int, int, int]) -> None:
-        """Crop working image to (left, upper, right, lower)."""
+        """Crop working image to (left, upper, right, lower).
+
+        AIDEV-NOTE: Saves pre-crop state so uncrop() can restore it.
+        Only one level of undo is supported.
+        """
         if self.working_image is None:
             return
+        self._pre_crop_working = self.working_image.copy()
+        self._pre_crop_rgba = self._save_rgba.copy() if self._save_rgba is not None else None
         self.working_image = self.working_image.crop(box)
         if self._save_rgba is not None:
             self._save_rgba = self._save_rgba.crop(box)
+
+    def uncrop(self) -> bool:
+        """Restore the pre-crop image state. Returns True if uncrop was performed."""
+        if self._pre_crop_working is None:
+            return False
+        self.working_image = self._pre_crop_working
+        self._save_rgba = self._pre_crop_rgba
+        self._pre_crop_working = None
+        self._pre_crop_rgba = None
+        return True
 
     def rotate(self, degrees: int) -> None:
         """Rotate working image by 90, 180, or 270 degrees."""

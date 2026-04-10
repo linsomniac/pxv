@@ -154,6 +154,10 @@ class CanvasView:
     def zoom_normal(self) -> None:
         self.zoom = 1.0
 
+    def zoom_set(self, value: float) -> None:
+        """Set zoom to an arbitrary value, clamped to [0.01, 64.0]."""
+        self.zoom = max(0.01, min(64.0, value))
+
     def zoom_fit(self, image_size: tuple[int, int], canvas_size: tuple[int, int]) -> None:
         """Set zoom so the image fits within the given canvas size."""
         img_w, img_h = image_size
@@ -164,6 +168,17 @@ class CanvasView:
         scale_w = max_w / img_w
         scale_h = max_h / img_h
         self.zoom = min(scale_w, scale_h, 1.0)  # never upscale on initial fit
+
+    def zoom_max(self, image_size: tuple[int, int], canvas_size: tuple[int, int]) -> None:
+        """Set zoom so the image fills the display (may upscale)."""
+        img_w, img_h = image_size
+        max_w, max_h = canvas_size
+        if img_w <= 0 or img_h <= 0:
+            self.zoom = 1.0
+            return
+        scale_w = max_w / img_w
+        scale_h = max_h / img_h
+        self.zoom = min(scale_w, scale_h)
 
     def _nearest_zoom_index(self) -> int:
         """Find the index of the nearest zoom level to current zoom."""

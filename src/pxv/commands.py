@@ -226,6 +226,52 @@ def cmd_zoom_normal(app: PxvApp) -> None:
     app.refresh_display()
 
 
+def cmd_zoom_increase(app: PxvApp) -> None:
+    """Increase zoom by 10%."""
+    app.canvas_view.zoom_set(app.canvas_view.zoom * 1.1)
+    app.canvas_view.clear_selection()
+    app.refresh_display()
+
+
+def cmd_zoom_reduce(app: PxvApp) -> None:
+    """Reduce zoom by 10%."""
+    app.canvas_view.zoom_set(app.canvas_view.zoom * 0.9)
+    app.canvas_view.clear_selection()
+    app.refresh_display()
+
+
+def cmd_zoom_double(app: PxvApp) -> None:
+    """Double the zoom level."""
+    app.canvas_view.zoom_set(app.canvas_view.zoom * 2.0)
+    app.canvas_view.clear_selection()
+    app.refresh_display()
+
+
+def cmd_zoom_halve(app: PxvApp) -> None:
+    """Halve the zoom level."""
+    app.canvas_view.zoom_set(app.canvas_view.zoom * 0.5)
+    app.canvas_view.clear_selection()
+    app.refresh_display()
+
+
+def cmd_zoom_max(app: PxvApp) -> None:
+    """Zoom to fill the display while preserving aspect ratio."""
+    img_size = app.image_model.get_working_size()
+    if img_size == (0, 0):
+        return
+    max_w, max_h = app._get_max_image_size()
+    app.canvas_view.zoom_max(img_size, (max_w, max_h))
+    app.canvas_view.clear_selection()
+    app.refresh_display()
+
+
+def cmd_uncrop(app: PxvApp) -> None:
+    """Undo the last crop operation."""
+    if app.image_model.uncrop():
+        app.canvas_view.clear_selection()
+        app.refresh_display()
+
+
 def cmd_next_image(app: PxvApp) -> None:
     p = app.file_list.next()
     if p is not None:
