@@ -12,6 +12,7 @@ KEYBINDINGS: list[tuple[str, str]] = [
     ("?", "Show this help"),
     ("q", "Quit"),
     ("c", "Crop to selection"),
+    ("A", "Autocrop background borders"),
     ("u", "Uncrop (undo last crop)"),
     ("n", "Zoom to 1:1 (normal)"),
     ("e", "Open enhancements dialog"),

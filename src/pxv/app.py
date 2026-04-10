@@ -128,6 +128,7 @@ class PxvApp:
     def _bind_keys(self) -> None:
         self.root.bind("<Key-q>", lambda _: commands.cmd_quit(self))
         self.root.bind("<Key-c>", lambda _: commands.cmd_crop(self))
+        self.root.bind("<Key-A>", lambda _: commands.cmd_autocrop(self))
         self.root.bind("<Key-u>", lambda _: commands.cmd_uncrop(self))
         self.root.bind("<Key-n>", lambda _: commands.cmd_zoom_normal(self))
         self.root.bind("<Key-e>", lambda _: commands.cmd_enhancement_dialog(self))

@@ -265,6 +265,20 @@ def cmd_zoom_max(app: PxvApp) -> None:
     app.refresh_display()
 
 
+def cmd_autocrop(app: PxvApp) -> None:
+    """Auto-crop uniform background borders from the image."""
+    if app.image_model.working_image is None:
+        return
+    if app.image_model.autocrop():
+        app.canvas_view.clear_selection()
+        app.refresh_display()
+    else:
+        # Brief status message in title bar, auto-restored after 2 seconds
+        old_title = app.root.title()
+        app.root.title("pxv: Autocrop \u2013 nothing to crop")
+        app.root.after(2000, lambda: app.root.title(old_title))
+
+
 def cmd_uncrop(app: PxvApp) -> None:
     """Undo the last crop operation."""
     if app.image_model.uncrop():

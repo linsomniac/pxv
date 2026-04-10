@@ -22,6 +22,7 @@ class ContextMenu:
         self.menu.add_separator()
 
         self.menu.add_command(label="Crop", command=lambda: commands.cmd_crop(app))
+        self.menu.add_command(label="Autocrop", command=lambda: commands.cmd_autocrop(app))
         self.menu.add_command(label="Resize...", command=lambda: commands.cmd_resize(app))
         self.menu.add_command(label="Reset", command=lambda: commands.cmd_reset(app))
         self.menu.add_separator()

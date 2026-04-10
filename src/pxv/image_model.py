@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 from pxv.enhancements import EnhancementParams, apply_enhancements
 
@@ -97,6 +97,128 @@ class ImageModel:
         self.working_image = self.working_image.crop(box)
         if self._save_rgba is not None:
             self._save_rgba = self._save_rgba.crop(box)
+
+    # AIDEV-NOTE: xv-style autocrop tolerance constants.
+    # EPSILON: max per-channel difference from background for a pixel to be
+    # considered background (~15% of 256). Matches xv's 24-bit EPSILON.
+    # MISSPCT: max percentage of foreground pixels allowed in a row/column
+    # for it to still be trimmed (handles JPEG artifacts, anti-aliasing).
+    _AUTOCROP_EPSILON = 39
+    _AUTOCROP_MISSPCT = 6
+
+    def autocrop(self) -> bool:
+        """Auto-crop uniform background borders. Returns True if cropping was performed.
+
+        For transparent images, trims fully-transparent borders.
+        For RGB images, detects background from the average of the 4 corner pixels
+        with xv-style tolerance.
+        """
+        if self.working_image is None:
+            return False
+        box = self._find_autocrop_box()
+        if box is None:
+            return False
+        self.crop(box)
+        return True
+
+    def _find_autocrop_box(self) -> tuple[int, int, int, int] | None:
+        """Determine the bounding box for autocrop, or None if no crop is needed."""
+        assert self.working_image is not None
+
+        if self._save_rgba is not None:
+            fg_mask = self._autocrop_mask_alpha()
+        else:
+            fg_mask = self._autocrop_mask_rgb()
+
+        return self._autocrop_scan_edges(fg_mask)
+
+    def _autocrop_mask_alpha(self) -> Image.Image:
+        """Build foreground mask from alpha channel (any opacity = foreground)."""
+        assert self._save_rgba is not None
+        alpha = self._save_rgba.split()[3]
+        return alpha.point(lambda a: 255 if a > 0 else 0)
+
+    def _autocrop_mask_rgb(self) -> Image.Image:
+        """Build foreground mask using 4-corner averaged background with tolerance."""
+        img = self.working_image
+        assert img is not None
+        w, h = img.size
+
+        # Average all 4 corners for background color
+        corners: list[tuple[int, ...]] = [
+            img.getpixel((0, 0)),  # type: ignore[list-item]
+            img.getpixel((w - 1, 0)),  # type: ignore[list-item]
+            img.getpixel((0, h - 1)),  # type: ignore[list-item]
+            img.getpixel((w - 1, h - 1)),  # type: ignore[list-item]
+        ]
+        bg = tuple(sum(c[i] for c in corners) // 4 for i in range(3))
+
+        # Per-pixel absolute difference from background
+        bg_img = Image.new("RGB", img.size, bg)
+        diff = ImageChops.difference(img, bg_img)
+
+        # Foreground = any channel differs by more than EPSILON
+        lut = [0 if x <= self._AUTOCROP_EPSILON else 255 for x in range(256)]
+        r, g, b = diff.split()
+        return ImageChops.lighter(
+            ImageChops.lighter(r.point(lut), g.point(lut)),
+            b.point(lut),
+        )
+
+    def _autocrop_scan_edges(self, fg_mask: Image.Image) -> tuple[int, int, int, int] | None:
+        """Scan inward from each edge to find the autocrop bounding box.
+
+        A row/column is considered background if its foreground pixel count
+        does not exceed MISSPCT percent of the row/column length.
+        Returns None if the image is entirely background or already tight.
+        """
+        w, h = fg_mask.size
+        max_miss_row = w * self._AUTOCROP_MISSPCT // 100
+        max_miss_col = h * self._AUTOCROP_MISSPCT // 100
+
+        mask_bytes = fg_mask.tobytes()
+
+        # Scan from top
+        top = 0
+        for y in range(h):
+            if mask_bytes[y * w : (y + 1) * w].count(255) > max_miss_row:
+                break
+            top = y + 1
+
+        if top >= h:
+            return None  # entire image is background
+
+        # Scan from bottom
+        bottom = h
+        for y in range(h - 1, top - 1, -1):
+            if mask_bytes[y * w : (y + 1) * w].count(255) > max_miss_row:
+                break
+            bottom = y
+
+        # Transpose mask for efficient column scanning (column x becomes row x)
+        mask_t_bytes = fg_mask.transpose(Image.Transpose.TRANSPOSE).tobytes()
+
+        # Scan from left
+        left = 0
+        for x in range(w):
+            if mask_t_bytes[x * h : (x + 1) * h].count(255) > max_miss_col:
+                break
+            left = x + 1
+
+        if left >= w:
+            return None
+
+        # Scan from right
+        right = w
+        for x in range(w - 1, left - 1, -1):
+            if mask_t_bytes[x * h : (x + 1) * h].count(255) > max_miss_col:
+                break
+            right = x
+
+        box = (left, top, right, bottom)
+        if box == (0, 0, w, h):
+            return None  # already tight, nothing to crop
+        return box
 
     def uncrop(self) -> bool:
         """Restore the pre-crop image state. Returns True if uncrop was performed."""
