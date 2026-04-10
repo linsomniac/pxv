@@ -299,6 +299,13 @@ def cmd_enhancement_dialog(app: PxvApp) -> None:
     app.enhancement_dialog = EnhancementDialog(app)
 
 
+def cmd_help(app: PxvApp) -> None:
+    """Show keyboard shortcuts help dialog."""
+    from pxv.dialogs import help_dialog
+
+    help_dialog(app.root)
+
+
 def cmd_about(app: PxvApp) -> None:
     from pxv import __version__
 

@@ -1,9 +1,33 @@
-"""Resize dialog and About dialog for pxv."""
+"""Resize dialog, Help dialog, and About dialog for pxv."""
 
 from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+
+# AIDEV-NOTE: This table is the single source of truth for keyboard shortcuts
+# displayed in the help dialog. Update it whenever a binding is added/changed
+# in PxvApp._bind_keys().
+KEYBINDINGS: list[tuple[str, str]] = [
+    ("?", "Show this help"),
+    ("q", "Quit"),
+    ("c", "Crop to selection"),
+    ("u", "Uncrop (undo last crop)"),
+    ("n", "Zoom to 1:1 (normal)"),
+    ("e", "Open enhancements dialog"),
+    (",", "Reduce zoom 10%"),
+    (".", "Increase zoom 10%"),
+    ("<", "Halve zoom"),
+    (">", "Double zoom"),
+    ("M", "Zoom to fit display"),
+    ("t", "Rotate counterclockwise"),
+    ("T", "Rotate clockwise"),
+    ("Ctrl+S", "Save As..."),
+    ("Space / Right", "Next image"),
+    ("Backspace / Left", "Previous image"),
+    ("Escape", "Clear selection"),
+    ("Right-click", "Context menu"),
+]
 
 
 def resize_dialog(parent: tk.Tk, current_size: tuple[int, int]) -> tuple[int, int] | None:
@@ -106,3 +130,42 @@ def resize_dialog(parent: tk.Tk, current_size: tuple[int, int]) -> tuple[int, in
 
     parent.wait_window(dialog)
     return result
+
+
+def help_dialog(parent: tk.Tk) -> None:
+    """Modal dialog listing all keyboard shortcuts."""
+    dialog = tk.Toplevel(parent)
+    dialog.title("Keyboard Shortcuts")
+    dialog.resizable(False, False)
+    dialog.transient(parent)
+    dialog.grab_set()
+
+    frame = ttk.Frame(dialog, padding=12)
+    frame.pack(fill=tk.BOTH, expand=True)
+
+    ttk.Label(frame, text="Keyboard Shortcuts", font=("TkDefaultFont", 12, "bold")).pack(
+        pady=(0, 8)
+    )
+
+    grid = ttk.Frame(frame)
+    grid.pack(fill=tk.BOTH)
+
+    for row, (key, description) in enumerate(KEYBINDINGS):
+        ttk.Label(grid, text=key, font=("TkFixedFont", 10, "bold"), width=20, anchor=tk.E).grid(
+            row=row, column=0, sticky=tk.E, padx=(0, 8), pady=1
+        )
+        ttk.Label(grid, text=description).grid(row=row, column=1, sticky=tk.W, pady=1)
+
+    ttk.Button(frame, text="Close", command=dialog.destroy, width=8).pack(pady=(12, 0))
+
+    dialog.bind("<Escape>", lambda _: dialog.destroy())
+    dialog.bind("<question>", lambda _: dialog.destroy())
+    dialog.bind("<Return>", lambda _: dialog.destroy())
+
+    # Center on parent
+    dialog.update_idletasks()
+    px = parent.winfo_x() + (parent.winfo_width() - dialog.winfo_width()) // 2
+    py = parent.winfo_y() + (parent.winfo_height() - dialog.winfo_height()) // 2
+    dialog.geometry(f"+{px}+{py}")
+
+    parent.wait_window(dialog)

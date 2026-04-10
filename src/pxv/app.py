@@ -141,6 +141,7 @@ class PxvApp:
         self.root.bind("<BackSpace>", lambda _: commands.cmd_prev_image(self))
         self.root.bind("<Left>", lambda _: commands.cmd_prev_image(self))
         self.root.bind("<Escape>", lambda _: self.canvas_view.clear_selection())
+        self.root.bind("<question>", lambda _: commands.cmd_help(self))
 
     def _bind_configure(self) -> None:
         """Debounced handler for window resize events."""
