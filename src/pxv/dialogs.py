@@ -20,6 +20,7 @@ KEYBINDINGS: list[tuple[str, str]] = [
     ("<", "Halve zoom"),
     (">", "Double zoom"),
     ("M", "Zoom to fit display"),
+    ("D", "Toggle dark/light background"),
     ("t", "Rotate counterclockwise"),
     ("T", "Rotate clockwise"),
     ("Ctrl+S", "Save As..."),

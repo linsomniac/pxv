@@ -162,16 +162,29 @@ class ImageModel:
         self,
         zoom: float,
         params: EnhancementParams,
+        bg_color: tuple[int, int, int] = (255, 255, 255),
     ) -> Image.Image | None:
         """Get the image scaled for display and with enhancements applied.
 
         AIDEV-NOTE: Scale FIRST, then enhance — this is ~4x faster than enhance-then-scale
         because the enhancement pipeline operates on fewer pixels.
+        When bg_color differs from white and _save_rgba exists, we recomposite
+        the true RGBA onto the requested background instead of using the
+        white-composited working_image.
         """
         if self.working_image is None:
             return None
 
-        w, h = self.working_image.size
+        # AIDEV-NOTE: For transparent images, recomposite onto the chosen bg_color
+        # so the user can preview transparency against dark or light backgrounds.
+        # Falls back to the white-composited working_image for opaque images.
+        if self._save_rgba is not None and bg_color != (255, 255, 255):
+            base = Image.new("RGB", self._save_rgba.size, bg_color)
+            base.paste(self._save_rgba, mask=self._save_rgba.split()[3])
+        else:
+            base = self.working_image
+
+        w, h = base.size
         display_w = max(1, int(w * zoom))
         display_h = max(1, int(h * zoom))
 
@@ -182,9 +195,9 @@ class ImageModel:
             resample = Image.Resampling.LANCZOS
 
         if zoom == 1.0:
-            scaled = self.working_image.copy()
+            scaled = base.copy()
         else:
-            scaled = self.working_image.resize((display_w, display_h), resample)
+            scaled = base.resize((display_w, display_h), resample)
 
         return apply_enhancements(scaled, params, zoom=zoom)
 

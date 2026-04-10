@@ -299,6 +299,12 @@ def cmd_enhancement_dialog(app: PxvApp) -> None:
     app.enhancement_dialog = EnhancementDialog(app)
 
 
+def cmd_toggle_background(app: PxvApp) -> None:
+    """Toggle transparent image background between dark and light."""
+    app.dark_background = not app.dark_background
+    app.refresh_display()
+
+
 def cmd_help(app: PxvApp) -> None:
     """Show keyboard shortcuts help dialog."""
     from pxv.dialogs import help_dialog

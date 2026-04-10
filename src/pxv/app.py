@@ -82,6 +82,9 @@ class PxvApp:
 
         # Will be set if the enhancement dialog is open
         self.enhancement_dialog: EnhancementDialog | None = None
+        # AIDEV-NOTE: Toggles transparent-area compositing between white and black.
+        # Only affects display; saving always uses the true alpha channel.
+        self.dark_background: bool = False
 
         # Create canvas view (passes right-click handler)
         self.canvas_view = CanvasView(root, on_right_click=self._on_right_click)
@@ -133,6 +136,7 @@ class PxvApp:
         self.root.bind("<greater>", lambda _: commands.cmd_zoom_double(self))
         self.root.bind("<less>", lambda _: commands.cmd_zoom_halve(self))
         self.root.bind("<Key-M>", lambda _: commands.cmd_zoom_max(self))
+        self.root.bind("<Key-D>", lambda _: commands.cmd_toggle_background(self))
         self.root.bind("<Key-t>", lambda _: commands.cmd_rotate(self, 270))
         self.root.bind("<Key-T>", lambda _: commands.cmd_rotate(self, 90))
         self.root.bind("<Control-s>", lambda _: commands.cmd_save_as(self))
@@ -187,11 +191,15 @@ class PxvApp:
 
         self.refresh_display()
 
+    def _bg_color(self) -> tuple[int, int, int]:
+        return (0, 0, 0) if self.dark_background else (255, 255, 255)
+
     def refresh_display(self) -> None:
         """Re-render the image with current zoom and enhancement params."""
         display_img = self.image_model.get_display_image(
             zoom=self.canvas_view.zoom,
             params=self.enhancement_params,
+            bg_color=self._bg_color(),
         )
         if display_img is not None:
             # AIDEV-NOTE: Resize window BEFORE display() so the canvas has correct
@@ -215,6 +223,7 @@ class PxvApp:
         display_img = self.image_model.get_display_image(
             zoom=self.canvas_view.zoom,
             params=self.enhancement_params,
+            bg_color=self._bg_color(),
         )
         if display_img is not None:
             self.canvas_view.display(display_img)
