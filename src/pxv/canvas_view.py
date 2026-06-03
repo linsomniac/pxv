@@ -1,8 +1,10 @@
-"""Image display canvas with rubber-band selection and zoom.
+"""Image display canvas with rubber-band selection, zoom, and pan.
 
-AIDEV-NOTE: The image is always centered on the canvas. Rubber-band coordinates
-are in canvas space and must be converted to image space for crop operations.
-The conversion accounts for the centering offset and current zoom factor.
+AIDEV-NOTE: The image is centered within the canvas scrollregion. When a zoomed
+image is larger than the viewport it can be panned with the scroll wheel
+(Shift+wheel pans horizontally). Rubber-band coordinates are taken in canvas space
+(via canvasx/canvasy, so they stay correct while scrolled) and converted to image
+space for crop operations, accounting for the centering offset and zoom factor.
 """
 
 from __future__ import annotations
@@ -55,9 +57,22 @@ class CanvasView:
         # Right-click: Button-3 on Linux/Windows, Button-2 on macOS
         self.canvas.bind("<Button-3>", self._on_right_click_event)
         self.canvas.bind("<Button-2>", self._on_right_click_event)
+        # Scroll-wheel panning (no-op unless the image exceeds the viewport).
+        # Windows/macOS deliver <MouseWheel>; X11 delivers Button-4/5. Shift pans
+        # horizontally. Bound to the root so the wheel works regardless of pointer.
+        self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind("<Shift-MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind("<Button-4>", self._on_mouse_wheel)
+        self.canvas.bind("<Button-5>", self._on_mouse_wheel)
+        self.canvas.bind("<Shift-Button-4>", self._on_mouse_wheel)
+        self.canvas.bind("<Shift-Button-5>", self._on_mouse_wheel)
 
     def display(self, pil_image: Image.Image) -> None:
         """Display a PIL image centered on the canvas."""
+        size_changed = (pil_image.width, pil_image.height) != (
+            self._display_width,
+            self._display_height,
+        )
         self._display_width = pil_image.width
         self._display_height = pil_image.height
         self._photo_image = ImageTk.PhotoImage(pil_image)
@@ -84,6 +99,22 @@ class CanvasView:
                 max(canvas_h, self._display_height),
             )
         )
+
+        # AIDEV-NOTE: Only re-center the viewport when the displayed size changes
+        # (load/navigate/zoom), so an oversized image starts centered rather than
+        # showing a clipped corner — but a same-size redraw (slider preview, resize)
+        # preserves the user's current pan position.
+        if size_changed:
+            self._center_view()
+
+    def _center_view(self) -> None:
+        """Center the viewport on the image (only matters when image > canvas)."""
+        canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
+        region_w = max(canvas_w, self._display_width)
+        region_h = max(canvas_h, self._display_height)
+        self.canvas.xview_moveto((region_w - canvas_w) / 2 / region_w if region_w else 0.0)
+        self.canvas.yview_moveto((region_h - canvas_h) / 2 / region_h if region_h else 0.0)
 
     def clear_selection(self) -> None:
         """Remove the rubber-band rectangle and clear selection."""
@@ -169,15 +200,21 @@ class CanvasView:
 
     # --- Mouse event handlers ---
 
+    def _canvas_xy(self, event: tk.Event) -> tuple[int, int]:
+        """Translate widget-relative event coords to canvas coords (scroll-aware)."""
+        cx = self.canvas.canvasx(event.x)  # type: ignore[no-untyped-call]
+        cy = self.canvas.canvasy(event.y)  # type: ignore[no-untyped-call]
+        return (int(cx), int(cy))
+
     def _on_press(self, event: tk.Event) -> None:
         self.clear_selection()
-        self._rb_start = (event.x, event.y)
+        self._rb_start = self._canvas_xy(event)
 
     def _on_drag(self, event: tk.Event) -> None:
         if self._rb_start is None:
             return
         x0, y0 = self._rb_start
-        x1, y1 = event.x, event.y
+        x1, y1 = self._canvas_xy(event)
         if self._rubber_band_id is None:
             self._rubber_band_id = self.canvas.create_rectangle(
                 x0, y0, x1, y1, outline="yellow", dash=(6, 6), width=2
@@ -189,7 +226,7 @@ class CanvasView:
         if self._rb_start is None:
             return
         x0, y0 = self._rb_start
-        x1, y1 = event.x, event.y
+        x1, y1 = self._canvas_xy(event)
         self._rb_start = None
 
         # If selection is tiny (click without meaningful drag), clear it
@@ -199,6 +236,25 @@ class CanvasView:
 
         # Normalize: ensure x1 > x0, y1 > y0
         self._selection = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+    def _on_mouse_wheel(self, event: tk.Event) -> str | None:
+        """Pan the view with the scroll wheel (Shift = horizontal)."""
+        num = getattr(event, "num", 0)
+        if num == 4:  # X11 scroll up
+            delta = -1
+        elif num == 5:  # X11 scroll down
+            delta = 1
+        elif event.delta:  # Windows/macOS
+            delta = -1 if event.delta > 0 else 1
+        else:
+            return None
+        # event.state is an int bitmask for pointer events (typed int | str); 0x1 = Shift.
+        shift_held = isinstance(event.state, int) and bool(event.state & 0x0001)
+        if shift_held:  # Shift held -> horizontal pan
+            self.canvas.xview_scroll(delta, "units")
+        else:
+            self.canvas.yview_scroll(delta, "units")
+        return "break"
 
     def _on_right_click_event(self, event: tk.Event) -> None:
         if self._on_right_click is not None:
