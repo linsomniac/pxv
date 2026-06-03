@@ -114,10 +114,12 @@ def apply_enhancements(
 ) -> Image.Image:
     """Apply the full enhancement pipeline to an image. Returns a new image.
 
-    AIDEV-NOTE: zoom scales the blur radius so that preview (scale-then-enhance)
-    matches save (enhance at full res). At 50% zoom the image has half the pixels,
-    so halving the radius produces an equivalent visual blur. Sharpen uses a fixed
-    3x3 kernel and does not need scaling.
+    AIDEV-NOTE: zoom scales the blur radius so the preview (scale-then-enhance)
+    approximates the save (enhance at full res). At 50% zoom the image has half the
+    pixels, so halving the radius produces an equivalent visual blur. Sharpen uses
+    ImageEnhance.Sharpness — a fixed 3x3 convolution with no radius — so it CANNOT be
+    scaled the same way; its strength is pixel-relative, which means the live Sharpen
+    preview is only approximate and may differ from the full-resolution saved result.
     """
     if params.is_identity():
         return img.copy()
@@ -151,10 +153,11 @@ def apply_enhancements(
         result = result.point(lut)
 
     # 5. Blur (radius scaled by zoom for preview parity)
+    # AIDEV-NOTE: Gate only on the unscaled slider value, not on the zoom-scaled
+    # radius — otherwise at low zoom the blur is silently dropped from the preview
+    # while the full-resolution save still applies it.
     if params.blur > 0.0:
-        effective_radius = params.blur * zoom
-        if effective_radius > 0.01:
-            result = result.filter(ImageFilter.GaussianBlur(radius=effective_radius))
+        result = result.filter(ImageFilter.GaussianBlur(radius=params.blur * zoom))
 
     # 6. Sharpen
     if params.sharpen != 1.0:

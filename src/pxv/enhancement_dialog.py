@@ -151,6 +151,11 @@ class EnhancementDialog(tk.Toplevel):
         self.app.refresh_display()
 
     def _on_close(self) -> None:
+        # AIDEV-NOTE: Cancel any in-flight debounce timer before teardown so it
+        # can't fire a stray refresh after the dialog is gone.
+        if self._refresh_after_id is not None:
+            self.after_cancel(self._refresh_after_id)
+            self._refresh_after_id = None
         self.app.enhancement_dialog = None
         self.destroy()
 

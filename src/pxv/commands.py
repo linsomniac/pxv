@@ -12,6 +12,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import TYPE_CHECKING
 
+from PIL import Image
+
 if TYPE_CHECKING:
     from pxv.app import PxvApp
 
@@ -43,6 +45,34 @@ _OPEN_FILETYPES = [
     ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp *.ppm *.pgm *.pbm *.ico"),
     ("All files", "*.*"),
 ]
+
+
+def _resolve_save_format(path: str) -> tuple[str, str]:
+    """Resolve the Pillow format and a normalized path for a save target.
+
+    AIDEV-NOTE: If the extension is missing or unrecognized we default to PNG and
+    rewrite the suffix to .png, so the file's name matches its actual PNG content
+    (previously PNG bytes were written under a mismatched or extensionless name).
+    """
+    ext = Path(path).suffix.lower()
+    fmt = _FORMAT_MAP.get(ext)
+    if fmt is None:
+        return "PNG", str(Path(path).with_suffix(".png"))
+    return fmt, path
+
+
+def _rgba_to_gif(img: Image.Image) -> tuple[Image.Image, dict[str, object]]:
+    """Convert an RGBA image to a palettized frame with binary GIF transparency.
+
+    AIDEV-NOTE: GIF supports only a single transparent palette index (not partial
+    alpha), so we reserve index 255 for fully/mostly-transparent pixels (alpha < 128).
+    This keeps transparent regions transparent instead of flattening them to white.
+    """
+    alpha = img.split()[3]
+    transparent_mask = alpha.point(lambda a: 255 if a < 128 else 0)
+    palette_img = img.convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE, colors=255)
+    palette_img.paste(255, transparent_mask)
+    return palette_img, {"transparency": 255, "optimize": True}
 
 
 def cmd_open(app: PxvApp) -> None:
@@ -83,17 +113,23 @@ def cmd_save_as(app: PxvApp) -> None:
     if not path:
         return
 
-    ext = Path(path).suffix.lower()
-    fmt = _FORMAT_MAP.get(ext, "PNG")
+    fmt, path = _resolve_save_format(path)
     save_kwargs: dict[str, object] = {}
     if fmt == "JPEG":
         save_kwargs["quality"] = 95
 
+    # GIF carries binary transparency; PNG/WEBP/TIFF carry full alpha. For all of
+    # these we enhance the true RGBA so transparent pixels survive the round-trip.
+    preserve_alpha = fmt in _ALPHA_FORMATS or fmt == "GIF"
     save_img = app.image_model.get_save_image(
-        app.enhancement_params, preserve_alpha=fmt in _ALPHA_FORMATS
+        app.enhancement_params, preserve_alpha=preserve_alpha
     )
     if save_img is None:
         return
+
+    if fmt == "GIF" and save_img.mode == "RGBA":
+        save_img, gif_kwargs = _rgba_to_gif(save_img)
+        save_kwargs.update(gif_kwargs)
 
     try:
         save_img.save(path, format=fmt, **save_kwargs)
@@ -158,6 +194,8 @@ def cmd_flip_vertical(app: PxvApp) -> None:
 
 def cmd_grab(app: PxvApp) -> None:
     """Grab a screenshot of the pxv window and offer to save it."""
+    # AIDEV-NOTE: Keep capture and save in separate try blocks so a save failure
+    # (disk full, permissions) isn't mislabeled as a screenshot-capture error.
     try:
         from PIL import ImageGrab
 
@@ -166,18 +204,23 @@ def cmd_grab(app: PxvApp) -> None:
         w = app.root.winfo_width()
         h = app.root.winfo_height()
         screenshot = ImageGrab.grab(bbox=(x, y, x + w, y + h))
-
-        path = filedialog.asksaveasfilename(
-            title="Save Screenshot",
-            filetypes=_SAVE_FILETYPES,
-            initialfile="screenshot.png",
-        )
-        if path:
-            ext = Path(path).suffix.lower()
-            fmt = _FORMAT_MAP.get(ext, "PNG")
-            screenshot.save(path, format=fmt)
     except Exception as e:
         messagebox.showerror("Grab Error", f"Could not capture screenshot:\n{e}")
+        return
+
+    path = filedialog.asksaveasfilename(
+        title="Save Screenshot",
+        filetypes=_SAVE_FILETYPES,
+        initialfile="screenshot.png",
+    )
+    if not path:
+        return
+
+    fmt, path = _resolve_save_format(path)
+    try:
+        screenshot.save(path, format=fmt)
+    except Exception as e:
+        messagebox.showerror("Save Error", f"Could not save screenshot:\n{e}")
 
 
 def cmd_print(app: PxvApp) -> None:
@@ -262,9 +305,7 @@ def cmd_autocrop(app: PxvApp) -> None:
         app.refresh_display()
     else:
         # Brief status message in title bar, auto-restored after 2 seconds
-        old_title = app.root.title()
-        app.root.title("pxv: Autocrop \u2013 nothing to crop")
-        app.root.after(2000, lambda: app.root.title(old_title))
+        app.show_temp_title("pxv: Autocrop \u2013 nothing to crop")
 
 
 def cmd_uncrop(app: PxvApp) -> None:
@@ -275,15 +316,17 @@ def cmd_uncrop(app: PxvApp) -> None:
 
 
 def cmd_next_image(app: PxvApp) -> None:
-    p = app.file_list.next()
-    if p is not None:
-        app.load_current()
+    # AIDEV-NOTE: Roll the cursor back if the load fails (corrupt/unreadable file),
+    # so the file-list position stays in sync with the still-displayed image.
+    prev_index = app.file_list.index
+    if app.file_list.next() is not None and not app.load_current():
+        app.file_list.index = prev_index
 
 
 def cmd_prev_image(app: PxvApp) -> None:
-    p = app.file_list.prev()
-    if p is not None:
-        app.load_current()
+    prev_index = app.file_list.index
+    if app.file_list.prev() is not None and not app.load_current():
+        app.file_list.index = prev_index
 
 
 def cmd_enhancement_dialog(app: PxvApp) -> None:

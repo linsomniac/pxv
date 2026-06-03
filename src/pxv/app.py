@@ -98,6 +98,8 @@ class PxvApp:
         # programmatically resize the window to match the image.
         self._resizing_programmatically = False
         self._deco_size: tuple[int, int] | None = None
+        # AIDEV-NOTE: Pending after-id for the transient title-bar status message.
+        self._status_after_id: str | None = None
 
         self._bind_keys()
         self._bind_configure()
@@ -172,18 +174,22 @@ class PxvApp:
     def _on_right_click(self, event: tk.Event) -> None:
         self.context_menu.show(event)
 
-    def load_current(self) -> None:
-        """Load the current file from the file list."""
+    def load_current(self) -> bool:
+        """Load the current file from the file list. Returns True on success.
+
+        AIDEV-NOTE: Returns success so navigation can roll back the file-list
+        cursor on a failed load, keeping the cursor and the displayed image in sync.
+        """
         path = self.file_list.current()
         if path is None:
-            return
+            return False
         try:
             self.image_model.load(path)
         except Exception as e:
             from tkinter import messagebox
 
             messagebox.showerror("Open Error", f"Could not open {path.name}:\n{e}")
-            return
+            return False
 
         self.enhancement_params.reset()
         if self.enhancement_dialog is not None:
@@ -196,6 +202,24 @@ class PxvApp:
         self.canvas_view.zoom_fit(img_size, (max_w, max_h))
 
         self.refresh_display()
+        return True
+
+    def show_temp_title(self, message: str, duration_ms: int = 2000) -> None:
+        """Show a transient message in the title bar, then restore the real title.
+
+        AIDEV-NOTE: Tracks the pending after-id so repeated calls don't stack, and
+        the restore is guarded by winfo_exists() so a quit within the window is a
+        safe no-op rather than a callback against a destroyed interpreter.
+        """
+        if self._status_after_id is not None:
+            self.root.after_cancel(self._status_after_id)
+        self.root.title(message)
+        self._status_after_id = self.root.after(duration_ms, self._restore_title)
+
+    def _restore_title(self) -> None:
+        self._status_after_id = None
+        if self.root.winfo_exists():
+            self._update_title()
 
     def _bg_color(self) -> tuple[int, int, int]:
         return (0, 0, 0) if self.dark_background else (255, 255, 255)
@@ -267,12 +291,21 @@ def main() -> None:
     file_list = FileList(paths)
     app = PxvApp(root, file_list)
 
+    # AIDEV-NOTE: Deferred so the canvas has real dimensions once mainloop starts.
+    # Guarded by winfo_exists() in case the window is closed before the timer fires.
+    def _load_when_ready() -> None:
+        if root.winfo_exists():
+            app.load_current()
+
+    def _open_when_ready() -> None:
+        if root.winfo_exists():
+            commands.cmd_open(app)
+
     if file_list.count() > 0:
-        # Delay loading until after mainloop starts so canvas has real dimensions
-        root.after(50, app.load_current)
+        root.after(50, _load_when_ready)
     else:
         # No files: show open dialog after startup
-        root.after(100, lambda: commands.cmd_open(app))
+        root.after(100, _open_when_ready)
 
     root.mainloop()
 
