@@ -75,7 +75,7 @@ The enhancement dialog (`e`) provides real-time adjustment of:
 
 - Python 3.10+
 - Tkinter (usually included with Python; on Debian/Ubuntu: `sudo apt install python3-tk`)
-- Pillow 12+
+- Pillow 10+
 
 ## Development
 
