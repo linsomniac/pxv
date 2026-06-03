@@ -7,7 +7,6 @@ The conversion accounts for the centering offset and current zoom factor.
 
 from __future__ import annotations
 
-import bisect
 import tkinter as tk
 from typing import TYPE_CHECKING
 
@@ -15,8 +14,6 @@ from PIL import ImageTk
 
 if TYPE_CHECKING:
     from PIL import Image
-
-ZOOM_LEVELS = [0.10, 0.25, 0.33, 0.50, 0.75, 1.0, 1.50, 2.0, 3.0, 4.0, 8.0]
 
 
 class CanvasView:
@@ -141,16 +138,6 @@ class CanvasView:
             return None
         return (ix1, iy1, ix2, iy2)
 
-    def zoom_in(self) -> None:
-        idx = self._nearest_zoom_index()
-        if idx < len(ZOOM_LEVELS) - 1:
-            self.zoom = ZOOM_LEVELS[idx + 1]
-
-    def zoom_out(self) -> None:
-        idx = self._nearest_zoom_index()
-        if idx > 0:
-            self.zoom = ZOOM_LEVELS[idx - 1]
-
     def zoom_normal(self) -> None:
         self.zoom = 1.0
 
@@ -179,17 +166,6 @@ class CanvasView:
         scale_w = max_w / img_w
         scale_h = max_h / img_h
         self.zoom = min(scale_w, scale_h)
-
-    def _nearest_zoom_index(self) -> int:
-        """Find the index of the nearest zoom level to current zoom."""
-        idx = bisect.bisect_left(ZOOM_LEVELS, self.zoom)
-        if idx == 0:
-            return 0
-        if idx >= len(ZOOM_LEVELS):
-            return len(ZOOM_LEVELS) - 1
-        if abs(ZOOM_LEVELS[idx] - self.zoom) < abs(ZOOM_LEVELS[idx - 1] - self.zoom):
-            return idx
-        return idx - 1
 
     # --- Mouse event handlers ---
 

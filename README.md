@@ -31,12 +31,21 @@ pxv                        # open file dialog
 
 | Key | Action |
 |-----|--------|
-| `>` | Zoom in |
-| `<` | Zoom out |
+| `?` | Show keyboard shortcuts help |
+| `>` | Double zoom |
+| `<` | Halve zoom |
+| `.` | Increase zoom 10% |
+| `,` | Reduce zoom 10% |
 | `n` | Zoom to 1:1 (normal) |
+| `M` | Zoom to fill display |
 | `Space` / `Right` | Next image |
 | `Backspace` / `Left` | Previous image |
 | `c` | Crop to selection |
+| `A` | Autocrop background borders |
+| `u` | Uncrop (undo last crop) |
+| `t` | Rotate clockwise |
+| `T` | Rotate counterclockwise |
+| `D` | Toggle dark/light background |
 | `e` | Enhancement dialog |
 | `Ctrl+s` | Save as |
 | `Escape` | Clear selection |

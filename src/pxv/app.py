@@ -162,6 +162,11 @@ class PxvApp:
     def _handle_resize(self) -> None:
         self._configure_after_id = None
         if self.image_model.working_image is not None:
+            # AIDEV-NOTE: Clear any rubber-band selection — its canvas-space coords
+            # are stale once the image re-centers at the new canvas size, so a
+            # subsequent crop would target the wrong region. Every other mutating
+            # path clears the selection; this one must too.
+            self.canvas_view.clear_selection()
             self._update_display()
 
     def _on_right_click(self, event: tk.Event) -> None:

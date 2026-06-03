@@ -207,18 +207,6 @@ def cmd_print(app: PxvApp) -> None:
         messagebox.showinfo("Print", "Printing is only supported on Linux via lpr.")
 
 
-def cmd_zoom_in(app: PxvApp) -> None:
-    app.canvas_view.zoom_in()
-    app.canvas_view.clear_selection()
-    app.refresh_display()
-
-
-def cmd_zoom_out(app: PxvApp) -> None:
-    app.canvas_view.zoom_out()
-    app.canvas_view.clear_selection()
-    app.refresh_display()
-
-
 def cmd_zoom_normal(app: PxvApp) -> None:
     """Reset zoom to 1:1 pixel mapping."""
     app.canvas_view.zoom_normal()

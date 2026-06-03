@@ -37,13 +37,16 @@ class ImageModel:
     def _to_rgb_working(img: Image.Image) -> Image.Image:
         """Convert any image to RGB for the working/enhancement pipeline.
 
-        AIDEV-NOTE: RGBA is composited onto white so transparency renders
-        visibly. Other modes are directly converted. The enhancement pipeline
-        (HSV conversion, LUT, etc.) requires RGB.
+        AIDEV-NOTE: Any transparent image (RGBA, LA, PA, palette+transparency)
+        is composited onto white so transparency renders visibly and consistently
+        on the default background. Plain .convert("RGB") would instead leak the
+        underlying color of transparent pixels. Opaque non-RGB modes are converted
+        directly. The enhancement pipeline (HSV conversion, LUT, etc.) requires RGB.
         """
-        if img.mode == "RGBA":
+        if ImageModel._has_transparency(img):
+            rgba = img if img.mode == "RGBA" else img.convert("RGBA")
             bg = Image.new("RGB", img.size, (255, 255, 255))
-            bg.paste(img, mask=img.split()[3])
+            bg.paste(rgba, mask=rgba.split()[3])
             return bg
         if img.mode != "RGB":
             return img.convert("RGB")
