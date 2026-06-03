@@ -1,6 +1,6 @@
 [project]
 name = "pxv"
-version = "1.0.0"  #  NOTE: Also update in src/pxv/__init__.py
+version = "1.0.0"
 description = "A Python clone of the classic Unix xv image viewer"
 readme = "README.md"
 license = "CC0-1.0"
@@ -10,7 +10,11 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "pillow>=12.0",
+    # AIDEV-NOTE: Floor is the oldest Pillow providing the Image.Resampling /
+    # Image.Transpose enums (9.1+); 10.0 is a conservative, widely-available choice.
+    # Avoid raising this without a concrete API need — it forces upgrades and can
+    # cause resolver conflicts in shared environments.
+    "pillow>=10.0",
 ]
 keywords = ["image", "viewer", "xv", "pillow", "tkinter", "graphics"]
 classifiers = [
