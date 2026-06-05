@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from PIL import ExifTags, Image
 from PIL.ExifTags import GPSTAGS, TAGS
@@ -265,3 +266,67 @@ def all_tags(meta: ImageMetadata) -> list[tuple[int, str, str]]:
     for tag_id, value in meta.exif.get_ifd(_GPS_IFD).items():
         rows.append((tag_id, f"GPS {GPSTAGS.get(tag_id, hex(tag_id))}", _safe_str(value)))
     return sorted(rows)
+
+
+# Editable fields: (key, label, ifd id or None for IFD0, tag id). Verified writable.
+EDITABLE_FIELDS: list[tuple[str, str, int | None, int]] = [
+    ("description", "Description", None, _DESCRIPTION),
+    ("artist", "Artist", None, _ARTIST),
+    ("copyright", "Copyright", None, _COPYRIGHT),
+    ("date", "Date", _EXIF_IFD, _DATETIME_ORIGINAL),
+]
+
+
+def _field_container(exif: Image.Exif, ifd: int | None) -> Any:
+    # AIDEV-NOTE: returns the Exif (IFD0) or a sub-IFD dict; typed Any because PIL is
+    # untyped here and both support the mapping ops set_editable/get_editable use.
+    return exif if ifd is None else exif.get_ifd(ifd)
+
+
+def get_editable(meta: ImageMetadata, key: str) -> str:
+    for k, _label, ifd, tag in EDITABLE_FIELDS:
+        if k == key:
+            value = _field_container(meta.exif, ifd).get(tag, "")
+            return str(value) if value else ""
+    return ""
+
+
+def set_editable(meta: ImageMetadata, key: str, value: str) -> None:
+    for k, _label, ifd, tag in EDITABLE_FIELDS:
+        if k == key:
+            container = _field_container(meta.exif, ifd)
+            if value:
+                container[tag] = value
+            else:
+                container.pop(tag, None)
+            return
+
+
+def redact_gps(exif: Image.Exif) -> None:
+    """Remove GPS location from the working EXIF (in place).
+
+    AIDEV-NOTE: Image.Exif.get_ifd() caches the parsed sub-IFD, so deleting only the
+    IFD0 pointer leaves a stale GPS dict that build_sections would still display after
+    "Remove GPS". Clear the cached dict (updates the in-memory view immediately) and
+    drop the IFD0 pointer (so it is not re-serialized on save). Verified necessary.
+    """
+    exif.get_ifd(_GPS_IFD).clear()
+    if _GPS_IFD in exif:
+        del exif[_GPS_IFD]
+
+
+def build_save_exif(meta: ImageMetadata) -> Image.Exif:
+    """Produce a sanitized clone of the working EXIF for writing on save.
+
+    AIDEV-NOTE: Clones via tobytes()/load() so the panel's working EXIF is not
+    mutated. Sanitizes unconditionally — orientation is reset to 1 (already baked
+    into the saved pixels by exif_transpose at load) and the stale embedded
+    pixel-dimension tags are dropped — so preserved EXIF can never contradict the
+    saved image. The embedded thumbnail (IFD1) is dropped inherently by tobytes().
+    """
+    clone = _exif_from_bytes(meta.exif.tobytes())
+    clone[_ORIENTATION] = 1
+    sub = clone.get_ifd(_EXIF_IFD)
+    sub.pop(_EXIF_IMAGE_WIDTH, None)
+    sub.pop(_EXIF_IMAGE_HEIGHT, None)
+    return clone

@@ -171,3 +171,63 @@ def test_all_tags_includes_named_and_gps(make_exif, tmp_path: Path) -> None:
     assert "ImageDescription" in names
     assert "Make" in names
     assert any(n.startswith("GPS ") for n in names)
+
+
+import io  # noqa: E402
+
+
+def _reload_exif_via_jpeg(exif_obj) -> "Image.Exif":  # type: ignore[no-untyped-def]
+    img = Image.new("RGB", (8, 6))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif_obj.tobytes())
+    buf.seek(0)
+    return Image.open(buf).getexif()
+
+
+def test_build_save_exif_resets_orientation_and_drops_dims(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    reloaded = _reload_exif_via_jpeg(metadata.build_save_exif(meta))
+    assert reloaded.get(0x0112) == 1
+    sub = reloaded.get_ifd(ExifTags.IFD.Exif)
+    assert 0xA002 not in sub and 0xA003 not in sub
+    assert sub.get(0x829A) == (1, 250)  # ExposureTime survives sanitizing
+
+
+def test_build_save_exif_does_not_mutate_working(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    metadata.build_save_exif(meta)
+    assert meta.exif.get(0x0112) == 6  # working orientation untouched
+
+
+def test_redact_gps_removes_location(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    metadata.redact_gps(meta.exif)
+    assert metadata.decode_gps(meta.exif.get_ifd(ExifTags.IFD.GPSInfo)) is None
+    reloaded = _reload_exif_via_jpeg(metadata.build_save_exif(meta))
+    assert len(reloaded.get_ifd(ExifTags.IFD.GPSInfo)) == 0
+
+
+def test_set_and_get_editable_description(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    metadata.set_editable(meta, "description", "hello")
+    assert metadata.get_editable(meta, "description") == "hello"
+    reloaded = _reload_exif_via_jpeg(metadata.build_save_exif(meta))
+    assert reloaded.get(0x010E) == "hello"
+
+
+def test_set_editable_date_writes_subifd(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    metadata.set_editable(meta, "date", "2030:01:02 03:04:05")
+    reloaded = _reload_exif_via_jpeg(metadata.build_save_exif(meta))
+    assert reloaded.get_ifd(ExifTags.IFD.Exif).get(0x9003) == "2030:01:02 03:04:05"
+
+
+def test_set_editable_empty_clears(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    metadata.set_editable(meta, "description", "")
+    assert metadata.get_editable(meta, "description") == ""
+
+
+def test_editable_fields_keys() -> None:
+    keys = [key for key, _label, _ifd, _tag in metadata.EDITABLE_FIELDS]
+    assert keys == ["description", "artist", "copyright", "date"]
