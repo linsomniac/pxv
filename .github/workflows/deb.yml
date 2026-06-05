@@ -16,12 +16,12 @@ jobs:
     name: Build & validate .deb
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
 
       - name: Install Debian build tooling
         run: |
@@ -88,7 +88,7 @@ jobs:
           test -f /usr/share/applications/pxv.desktop
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deb
           path: dist/pxv_*_all.deb
@@ -102,7 +102,7 @@ jobs:
       contents: write
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deb
           path: dist/

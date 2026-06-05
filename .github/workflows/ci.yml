@@ -9,17 +9,23 @@ on:
 permissions:
   contents: read
 
+# AIDEV-NOTE: Force uv's managed (python-build-standalone) interpreters. They
+# bundle tkinter, whereas the runner's system python3 has no python3-tk — so
+# importing pxv (which imports tkinter) would fail test collection otherwise.
+env:
+  UV_PYTHON_PREFERENCE: only-managed
+
 jobs:
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
         with:
           python-version: "3.12"
 
@@ -43,12 +49,12 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
         with:
           python-version: ${{ matrix.python-version }}
 
