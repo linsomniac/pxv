@@ -63,6 +63,11 @@ registration).
   `desktop-file-utils` dpkg triggers rebuild the caches automatically.
 - `pxv --help` and `pxv --version` (argparse) exit before `tk.Tk()` is ever
   constructed, so they are safe to run headlessly in CI (no Xvfb needed).
+- Debian's Python uses the `posix_local` sysconfig scheme by default, so
+  `python3 -m installer --prefix=/usr` installs under `/usr/local` unless
+  `DEB_PYTHON_INSTALL_LAYOUT=deb_system` is set (verified end-to-end in a
+  container build). `dpkg-buildpackage` also needs `build-essential`, which is
+  preinstalled on GitHub runners but added explicitly to the workflow.
 - `app.py` is imported by `pxv/__init__` **before** `__version__` is assigned,
   so `--version` must import `__version__` lazily inside `main()` (mirroring
   `commands.py:361`), not at module top, to avoid a circular import.
@@ -135,6 +140,11 @@ Description: Python clone of the classic Unix xv image viewer
 ```make
 #!/usr/bin/make -f
 export PYBUILD_NAME=pxv
+
+# Debian's patched Python defaults to the "posix_local" sysconfig scheme, so
+# `installer --prefix=/usr` would drop files under /usr/local (tripping
+# dh_usrlocal). Force the system layout (/usr/bin + /usr/lib/python3/dist-packages).
+export DEB_PYTHON_INSTALL_LAYOUT = deb_system
 
 WHEELDIR := debian/tmp-wheel
 
