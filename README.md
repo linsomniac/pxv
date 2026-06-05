@@ -27,6 +27,19 @@ pxv ~/Photos/              # all images in a directory
 pxv                        # open file dialog
 ```
 
+### Debian / Ubuntu (.deb)
+
+Each [GitHub release](https://github.com/linsomniac/pxv/releases) includes a
+`pxv_<version>_all.deb`. Install it (apt pulls in `python3-tk` and Pillow):
+
+```sh
+sudo apt install ./pxv_1.0.1_all.deb
+```
+
+It targets current distributions (Debian 13 / Ubuntu 24.04 or newer, which ship
+Pillow ≥ 10). After installing, `pxv` is on your `PATH` and appears in the
+applications menu and image "Open with" lists.
+
 ## Keyboard Shortcuts
 
 | Key | Action |

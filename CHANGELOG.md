@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--version` command-line flag that prints the installed version and exits.
+- A native Debian package (`.deb`), built in CI and attached to each GitHub
+  release. Installs the `pxv` command plus a desktop launcher, scalable icon,
+  and "Open with" associations for common image formats.
+
 ## [1.0.1] - 2026-06-03
 
 A bug-fix and hardening release over 1.0.0.
