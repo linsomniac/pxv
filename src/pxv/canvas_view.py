@@ -18,6 +18,40 @@ if TYPE_CHECKING:
     from PIL import Image
 
 
+def selection_to_image_box(
+    selection: tuple[int, int, int, int],
+    working_size: tuple[int, int],
+    display_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+    zoom: float,
+) -> tuple[int, int, int, int] | None:
+    """Convert a canvas-space selection rectangle to working-image pixel coords.
+
+    AIDEV-NOTE: Pure geometry extracted from CanvasView.get_selection_image_coords
+    so it can be unit-tested without a live Tk display. The image is centered in
+    the canvas; we subtract that centering offset, divide by zoom, and clamp to the
+    image bounds. Returns None for a degenerate (zero/negative-area) box.
+    """
+    sx1, sy1, sx2, sy2 = selection
+    img_w, img_h = working_size
+    disp_w, disp_h = display_size
+    canvas_w, canvas_h = canvas_size
+
+    area_w = max(canvas_w, disp_w)
+    area_h = max(canvas_h, disp_h)
+    img_x0 = (area_w - disp_w) / 2
+    img_y0 = (area_h - disp_h) / 2
+
+    ix1 = max(0, min(img_w, int((sx1 - img_x0) / zoom)))
+    iy1 = max(0, min(img_h, int((sy1 - img_y0) / zoom)))
+    ix2 = max(0, min(img_w, int((sx2 - img_x0) / zoom)))
+    iy2 = max(0, min(img_h, int((sy2 - img_y0) / zoom)))
+
+    if ix2 <= ix1 or iy2 <= iy1:
+        return None
+    return (ix1, iy1, ix2, iy2)
+
+
 class CanvasView:
     """Canvas widget that displays an image with rubber-band selection and zoom."""
 
@@ -130,44 +164,20 @@ class CanvasView:
     def get_selection_image_coords(
         self, working_size: tuple[int, int]
     ) -> tuple[int, int, int, int] | None:
-        """Convert canvas selection rectangle to working_image pixel coordinates.
+        """Convert the canvas selection rectangle to working_image pixel coordinates.
 
-        AIDEV-NOTE: The image is centered on the canvas. We must:
-        1. Compute the image's top-left offset on the canvas
-        2. Subtract that offset from selection coords
-        3. Divide by zoom to get image-space coords
-        4. Clamp to image bounds
+        AIDEV-NOTE: Reads live widget sizes here and delegates the pure geometry to
+        selection_to_image_box() (module level) so the math stays unit-testable.
         """
         if self._selection is None:
             return None
-
-        sx1, sy1, sx2, sy2 = self._selection
-        img_w, img_h = working_size
-
-        canvas_w = self.canvas.winfo_width()
-        canvas_h = self.canvas.winfo_height()
-
-        # Image top-left on canvas (centered)
-        area_w = max(canvas_w, self._display_width)
-        area_h = max(canvas_h, self._display_height)
-        img_x0 = (area_w - self._display_width) / 2
-        img_y0 = (area_h - self._display_height) / 2
-
-        # Convert to image-relative coords and divide by zoom
-        ix1 = (sx1 - img_x0) / self.zoom
-        iy1 = (sy1 - img_y0) / self.zoom
-        ix2 = (sx2 - img_x0) / self.zoom
-        iy2 = (sy2 - img_y0) / self.zoom
-
-        # Clamp to image bounds
-        ix1 = max(0, min(img_w, int(ix1)))
-        iy1 = max(0, min(img_h, int(iy1)))
-        ix2 = max(0, min(img_w, int(ix2)))
-        iy2 = max(0, min(img_h, int(iy2)))
-
-        if ix2 <= ix1 or iy2 <= iy1:
-            return None
-        return (ix1, iy1, ix2, iy2)
+        return selection_to_image_box(
+            self._selection,
+            working_size,
+            (self._display_width, self._display_height),
+            (self.canvas.winfo_width(), self.canvas.winfo_height()),
+            self.zoom,
+        )
 
     def zoom_normal(self) -> None:
         self.zoom = 1.0
