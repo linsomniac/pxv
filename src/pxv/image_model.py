@@ -14,6 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageOps
 
 from pxv.enhancements import EnhancementParams, apply_enhancements
+from pxv import metadata
 
 
 class ImageModel:
@@ -28,6 +29,10 @@ class ImageModel:
         # AIDEV-NOTE: Pre-crop state for uncrop (one level of undo)
         self._pre_crop_working: Image.Image | None = None
         self._pre_crop_rgba: Image.Image | None = None
+        # AIDEV-NOTE: EXIF/metadata captured at load. keep_metadata gates whether it
+        # is written on Save As; default False preserves pxv's historical strip-on-save.
+        self.metadata: metadata.ImageMetadata | None = None
+        self.keep_metadata: bool = False
 
     @property
     def current_path(self) -> Path | None:
@@ -65,6 +70,11 @@ class ImageModel:
         """Load an image from disk. Handles EXIF orientation and mode conversion."""
         raw = Image.open(path)
         raw.load()  # force full load so file handle is released
+
+        # AIDEV-NOTE: Capture metadata from the raw, pre-transpose image where
+        # getexif() is reliable. exif_transpose below would normalize orientation.
+        self.metadata = metadata.read_metadata(raw, path)
+        self.keep_metadata = False
 
         # Fix EXIF orientation
         img: Image.Image = ImageOps.exif_transpose(raw)
@@ -276,6 +286,9 @@ class ImageModel:
             self._save_rgba = (
                 self._original_rgba.copy() if self._original_rgba is not None else None
             )
+        if self.metadata is not None:
+            self.metadata.restore()
+        self.keep_metadata = False
 
     def get_working_size(self) -> tuple[int, int]:
         if self.working_image is None:

@@ -234,3 +234,26 @@ def test_get_display_image_dark_background_recomposites() -> None:
     out = model.get_display_image(zoom=1.0, params=EnhancementParams(), bg_color=(0, 0, 0))
     assert out is not None
     assert out.getpixel((0, 0)) == (0, 0, 0)  # transparent shown on black background
+
+
+def test_load_captures_metadata(exif_jpeg: object) -> None:
+    from pxv.image_model import ImageModel
+
+    model = ImageModel()
+    model.load(exif_jpeg())  # type: ignore[operator]
+    assert model.metadata is not None
+    assert model.metadata.exif.get(0x010E) == "orig desc"
+    assert model.keep_metadata is False
+
+
+def test_reset_restores_metadata_and_keep_flag(exif_jpeg: object) -> None:
+    from pxv.image_model import ImageModel
+
+    model = ImageModel()
+    model.load(exif_jpeg())  # type: ignore[operator]
+    assert model.metadata is not None
+    model.metadata.exif[0x010E] = "edited"
+    model.keep_metadata = True
+    model.reset()
+    assert model.metadata.exif.get(0x010E) == "orig desc"
+    assert model.keep_metadata is False
