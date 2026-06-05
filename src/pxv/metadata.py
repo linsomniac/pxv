@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import ExifTags, Image
+from PIL.ExifTags import GPSTAGS, TAGS
 
 # Sub-IFD ids (verified on Pillow 12.2.0)
 _EXIF_IFD = ExifTags.IFD.Exif  # 0x8769 — exposure/camera detail tags
@@ -185,3 +186,82 @@ def read_metadata(raw: Image.Image, path: Path) -> ImageMetadata:
         exif=exif,
         original_exif_bytes=exif.tobytes(),
     )
+
+
+def _safe_str(value: object, limit: int = 80) -> str:
+    """Render an arbitrary EXIF value as a single trimmed display line."""
+    try:
+        s = value.decode("ascii", "replace") if isinstance(value, bytes) else str(value)
+    except Exception:
+        s = repr(value)
+    s = s.replace("\r", " ").replace("\n", " ").strip()
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def build_sections(meta: ImageMetadata) -> list[Section]:
+    """Group decoded metadata into File / Camera / Exposure / Location sections."""
+    exif = meta.exif
+    sub = exif.get_ifd(_EXIF_IFD)
+    gps = exif.get_ifd(_GPS_IFD)
+    sections: list[Section] = []
+
+    sections.append(
+        Section(
+            "File",
+            [
+                ("Name", meta.path.name),
+                ("Path", str(meta.path)),
+                ("Size", _format_size(meta.file_size)),
+                ("Format/Mode", f"{meta.file_format or '?'} · {meta.mode}"),
+                ("Dimensions", f"{meta.size[0]} × {meta.size[1]}"),
+            ],
+        )
+    )
+
+    cam_rows: list[tuple[str, str]] = []
+    make = exif.get(_MAKE)
+    model = exif.get(_MODEL)
+    if make or model:
+        cam_rows.append(("Make/Model", " ".join(str(x) for x in (make, model) if x)))
+    if _LENS_MODEL in sub:
+        cam_rows.append(("Lens", _safe_str(sub[_LENS_MODEL])))
+    taken = sub.get(_DATETIME_ORIGINAL) or exif.get(_DATETIME)
+    if taken:
+        cam_rows.append(("Taken", _format_datetime(taken)))
+    if _SOFTWARE in exif:
+        cam_rows.append(("Software", _safe_str(exif[_SOFTWARE])))
+    if cam_rows:
+        sections.append(Section("Camera", cam_rows))
+
+    parts: list[str] = []
+    for fn, tag in (
+        (_format_exposure_time, _EXPOSURE_TIME),
+        (_format_fnumber, _FNUMBER),
+        (_format_iso, _ISO),
+        (_format_focal_length, _FOCAL_LENGTH),
+        (_format_exposure_bias, _EXPOSURE_BIAS),
+    ):
+        if tag in sub:
+            rendered = fn(sub[tag])
+            if rendered:
+                parts.append(rendered)
+    if parts:
+        sections.append(Section("Exposure", [("Settings", " · ".join(parts))]))
+
+    coords = decode_gps(gps)
+    if coords:
+        sections.append(Section("Location", [("GPS", f"{coords[0]:.6f}, {coords[1]:.6f}")]))
+
+    return sections
+
+
+def all_tags(meta: ImageMetadata) -> list[tuple[int, str, str]]:
+    """Return every decoded tag as (id, name, value), sorted, for the full list view."""
+    rows: list[tuple[int, str, str]] = []
+    for tag_id, value in meta.exif.items():
+        rows.append((tag_id, TAGS.get(tag_id, hex(tag_id)), _safe_str(value)))
+    for tag_id, value in meta.exif.get_ifd(_EXIF_IFD).items():
+        rows.append((tag_id, TAGS.get(tag_id, hex(tag_id)), _safe_str(value)))
+    for tag_id, value in meta.exif.get_ifd(_GPS_IFD).items():
+        rows.append((tag_id, f"GPS {GPSTAGS.get(tag_id, hex(tag_id))}", _safe_str(value)))
+    return sorted(rows)

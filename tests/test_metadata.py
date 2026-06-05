@@ -100,7 +100,7 @@ def test_decode_gps_missing_returns_none() -> None:
 
 from pathlib import Path  # noqa: E402  (grouped with new metadata tests)
 
-from PIL import Image  # noqa: E402
+from PIL import ExifTags, Image  # noqa: E402, F401
 
 
 def test_read_metadata_basic(exif_jpeg) -> None:
@@ -133,3 +133,41 @@ def test_metadata_restore_reverts_edits(exif_jpeg) -> None:
     meta.exif[0x010E] = "changed"
     meta.restore()
     assert meta.exif.get(0x010E) == "orig desc"
+
+
+def _meta(exif, tmp_path: Path) -> "metadata.ImageMetadata":
+    """Wrap a bare Exif in an ImageMetadata for section/save tests (no file needed)."""
+    return metadata.ImageMetadata(
+        path=tmp_path / "x.jpg",
+        file_size=3_581_234,
+        file_format="JPEG",
+        mode="RGB",
+        size=(8, 6),
+        exif=exif,
+        original_exif_bytes=exif.tobytes(),
+    )
+
+
+def test_build_sections_groups(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    sections = {s.title: dict(s.rows) for s in metadata.build_sections(meta)}
+    assert sections["File"]["Dimensions"] == "8 × 6"
+    assert "iPhone 13 Pro" in sections["Camera"]["Make/Model"]
+    assert "f/2.8" in sections["Exposure"]["Settings"]
+    assert "37.77" in sections["Location"]["GPS"]
+
+
+def test_build_sections_no_exif(tmp_path: Path) -> None:
+    meta = _meta(Image.new("RGB", (4, 4)).getexif(), tmp_path)
+    titles = [s.title for s in metadata.build_sections(meta)]
+    assert "File" in titles
+    assert "Camera" not in titles
+    assert "Location" not in titles
+
+
+def test_all_tags_includes_named_and_gps(make_exif, tmp_path: Path) -> None:
+    meta = _meta(make_exif(), tmp_path)
+    names = {name for _id, name, _val in metadata.all_tags(meta)}
+    assert "ImageDescription" in names
+    assert "Make" in names
+    assert any(n.startswith("GPS ") for n in names)
