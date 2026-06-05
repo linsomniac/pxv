@@ -8,7 +8,10 @@ Mirrors enhancements.py (pure pipeline) vs enhancement_dialog.py (Tk widget).
 
 from __future__ import annotations
 
-from PIL import ExifTags
+from dataclasses import dataclass
+from pathlib import Path
+
+from PIL import ExifTags, Image
 
 # Sub-IFD ids (verified on Pillow 12.2.0)
 _EXIF_IFD = ExifTags.IFD.Exif  # 0x8769 — exposure/camera detail tags
@@ -124,3 +127,61 @@ def decode_gps(gps_ifd: dict[int, object]) -> tuple[float, float] | None:
     if lat is None or lon is None:
         return None
     return (lat, lon)
+
+
+def _exif_from_bytes(data: bytes) -> Image.Exif:
+    """Reconstruct an Exif object from bytes previously produced by Exif.tobytes()."""
+    exif = Image.Exif()
+    if data:
+        exif.load(data)
+    return exif
+
+
+@dataclass
+class Section:
+    """A titled group of (label, value) display rows for the info panel."""
+
+    title: str
+    rows: list[tuple[str, str]]
+
+
+@dataclass
+class ImageMetadata:
+    """Captured file facts plus the (mutable) working EXIF for one loaded image."""
+
+    path: Path
+    file_size: int | None
+    file_format: str | None
+    mode: str
+    size: tuple[int, int]
+    exif: Image.Exif
+    original_exif_bytes: bytes
+
+    def has_exif(self) -> bool:
+        return bool(dict(self.exif)) or bool(dict(self.exif.get_ifd(_EXIF_IFD)))
+
+    def restore(self) -> None:
+        """Revert all edits/redactions back to the metadata captured at load."""
+        self.exif = _exif_from_bytes(self.original_exif_bytes)
+
+
+def read_metadata(raw: Image.Image, path: Path) -> ImageMetadata:
+    """Capture file facts and EXIF from a freshly-opened image.
+
+    AIDEV-NOTE: Must be called on the raw, pre-exif_transpose image (where
+    getexif() is reliable). raw.load() must already have run.
+    """
+    try:
+        file_size: int | None = path.stat().st_size
+    except OSError:
+        file_size = None
+    exif = raw.getexif()
+    return ImageMetadata(
+        path=path,
+        file_size=file_size,
+        file_format=raw.format,
+        mode=raw.mode,
+        size=raw.size,
+        exif=exif,
+        original_exif_bytes=exif.tobytes(),
+    )

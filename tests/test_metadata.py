@@ -96,3 +96,40 @@ def test_decode_gps_pair() -> None:
 
 def test_decode_gps_missing_returns_none() -> None:
     assert metadata.decode_gps({}) is None
+
+
+from pathlib import Path  # noqa: E402  (grouped with new metadata tests)
+
+from PIL import Image  # noqa: E402
+
+
+def test_read_metadata_basic(exif_jpeg) -> None:
+    p = exif_jpeg()
+    raw = Image.open(p)
+    raw.load()
+    meta = metadata.read_metadata(raw, p)
+    assert meta.path == p
+    assert meta.file_format == "JPEG"
+    assert meta.mode == "RGB"
+    assert meta.size == (8, 6)
+    assert meta.file_size == p.stat().st_size
+    assert meta.exif.get(0x010E) == "orig desc"
+
+
+def test_read_metadata_no_exif(tmp_path: Path) -> None:
+    p = tmp_path / "plain.png"
+    Image.new("RGB", (4, 4)).save(p)
+    raw = Image.open(p)
+    raw.load()
+    meta = metadata.read_metadata(raw, p)
+    assert meta.has_exif() is False
+
+
+def test_metadata_restore_reverts_edits(exif_jpeg) -> None:
+    p = exif_jpeg()
+    raw = Image.open(p)
+    raw.load()
+    meta = metadata.read_metadata(raw, p)
+    meta.exif[0x010E] = "changed"
+    meta.restore()
+    assert meta.exif.get(0x010E) == "orig desc"
