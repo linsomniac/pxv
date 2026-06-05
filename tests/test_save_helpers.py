@@ -42,3 +42,71 @@ def test_rgba_to_gif_reserves_transparent_index() -> None:
     assert palette_img.mode == "P"
     assert kwargs == {"transparency": 255, "optimize": True}
     assert palette_img.getpixel((0, 0)) == 255  # transparent pixel -> reserved index 255
+
+
+def test_exif_for_save_keep_jpeg(exif_jpeg) -> None:
+    from pxv import commands
+    from pxv.image_model import ImageModel
+
+    model = ImageModel()
+    model.load(exif_jpeg())
+    model.keep_metadata = True
+    assert commands._exif_for_save(model, "JPEG") is not None
+
+
+def test_exif_for_save_strip_by_default(exif_jpeg) -> None:
+    from pxv import commands
+    from pxv.image_model import ImageModel
+
+    model = ImageModel()
+    model.load(exif_jpeg())  # keep_metadata defaults to False
+    assert commands._exif_for_save(model, "JPEG") is None
+
+
+def test_exif_for_save_unsupported_format(exif_jpeg) -> None:
+    from pxv import commands
+    from pxv.image_model import ImageModel
+
+    model = ImageModel()
+    model.load(exif_jpeg())
+    model.keep_metadata = True
+    assert commands._exif_for_save(model, "GIF") is None
+
+
+def test_keep_metadata_roundtrip_on_disk(exif_jpeg, tmp_path) -> None:
+    from PIL import Image
+
+    from pxv import commands
+    from pxv.enhancements import EnhancementParams
+    from pxv.image_model import ImageModel
+
+    model = ImageModel()
+    model.load(exif_jpeg())
+    model.keep_metadata = True
+    save_img = model.get_save_image(EnhancementParams())
+    assert save_img is not None
+    out = tmp_path / "out.jpg"
+    save_img.save(out, format="JPEG", exif=commands._exif_for_save(model, "JPEG"))
+
+    reloaded = Image.open(out).getexif()
+    assert reloaded.get(0x010E) == "orig desc"
+    assert reloaded.get(0x0112) == 1  # sanitized orientation
+
+
+def test_strip_default_roundtrip_has_no_exif(exif_jpeg, tmp_path) -> None:
+    from PIL import Image
+
+    from pxv import commands
+    from pxv.enhancements import EnhancementParams
+    from pxv.image_model import ImageModel
+
+    model = ImageModel()
+    model.load(exif_jpeg())  # default: strip
+    save_img = model.get_save_image(EnhancementParams())
+    assert save_img is not None
+    out = tmp_path / "out.jpg"
+    exif_bytes = commands._exif_for_save(model, "JPEG")
+    kwargs = {"exif": exif_bytes} if exif_bytes is not None else {}
+    save_img.save(out, format="JPEG", **kwargs)
+
+    assert not Image.open(out).getexif()

@@ -14,8 +14,11 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
+from pxv import metadata
+
 if TYPE_CHECKING:
     from pxv.app import PxvApp
+    from pxv.image_model import ImageModel
 
 # Supported save formats
 _SAVE_FILETYPES = [
@@ -40,6 +43,9 @@ _FORMAT_MAP = {
 }
 
 _ALPHA_FORMATS = {"PNG", "WEBP", "TIFF"}
+
+# Formats Pillow can write an exif= block to. GIF/BMP/PPM/ICO cannot.
+_EXIF_WRITE_FORMATS = {"JPEG", "TIFF", "WEBP", "PNG"}
 
 _OPEN_FILETYPES = [
     ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp *.ppm *.pgm *.pbm *.ico"),
@@ -93,6 +99,20 @@ def cmd_open(app: PxvApp) -> None:
     app.load_current()
 
 
+def _exif_for_save(model: "ImageModel", fmt: str) -> bytes | None:
+    """Return sanitized EXIF bytes to write, or None to strip (today's default).
+
+    AIDEV-NOTE: Pure decision helper (no UI) so it is unit-testable without Tk.
+    """
+    meta = model.metadata
+    if model.keep_metadata and meta is not None and fmt in _EXIF_WRITE_FORMATS:
+        # AIDEV-NOTE: bind through a typed local — Exif.tobytes() is Any (PIL untyped),
+        # and returning Any from a -> bytes | None function trips mypy warn_return_any.
+        data: bytes = metadata.build_save_exif(meta).tobytes()
+        return data
+    return None
+
+
 def cmd_save_as(app: PxvApp) -> None:
     """Save the enhanced image via Save As dialog."""
     if app.image_model.working_image is None:
@@ -117,6 +137,11 @@ def cmd_save_as(app: PxvApp) -> None:
     save_kwargs: dict[str, object] = {}
     if fmt == "JPEG":
         save_kwargs["quality"] = 95
+    exif_bytes = _exif_for_save(app.image_model, fmt)
+    if exif_bytes is not None:
+        save_kwargs["exif"] = exif_bytes
+    elif app.image_model.keep_metadata and fmt not in _EXIF_WRITE_FORMATS:
+        app.show_temp_title(f"pxv: metadata not saved for {fmt}")
 
     # GIF carries binary transparency; PNG/WEBP/TIFF carry full alpha. For all of
     # these we enhance the true RGBA so transparent pixels survive the round-trip.
@@ -327,6 +352,24 @@ def cmd_prev_image(app: PxvApp) -> None:
     prev_index = app.file_list.index
     if app.file_list.prev() is not None and not app.load_current():
         app.file_list.index = prev_index
+
+
+def cmd_info(app: PxvApp) -> None:
+    """Open or raise the image info / EXIF dialog."""
+    from pxv.info_dialog import InfoDialog
+
+    if app.info_dialog is not None:
+        try:
+            app.info_dialog.deiconify()
+            app.info_dialog.lift()
+            app.info_dialog.refresh()
+            return
+        except Exception:
+            app.info_dialog = None
+
+    if app.image_model.metadata is None:
+        return
+    app.info_dialog = InfoDialog(app)
 
 
 def cmd_enhancement_dialog(app: PxvApp) -> None:
