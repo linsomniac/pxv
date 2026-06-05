@@ -69,3 +69,30 @@ def test_format_size_none() -> None:
 
 def test_format_datetime() -> None:
     assert metadata._format_datetime("2024:08:12 14:33:02") == "2024-08-12 14:33:02"
+
+
+def test_gps_to_decimal_north() -> None:
+    dec = metadata._gps_to_decimal(((37, 1), (46, 1), (2964, 100)), "N")
+    assert dec is not None and abs(dec - 37.7749) < 1e-3
+
+
+def test_gps_to_decimal_west_is_negative() -> None:
+    dec = metadata._gps_to_decimal(((122, 1), (25, 1), (960, 100)), "W")
+    assert dec is not None and dec < 0 and abs(dec + 122.4193) < 1e-3
+
+
+def test_decode_gps_pair() -> None:
+    gps = {
+        1: "N",
+        2: ((37, 1), (46, 1), (2964, 100)),
+        3: "W",
+        4: ((122, 1), (25, 1), (960, 100)),
+    }
+    coords = metadata.decode_gps(gps)
+    assert coords is not None
+    lat, lon = coords
+    assert lat > 0 and lon < 0
+
+
+def test_decode_gps_missing_returns_none() -> None:
+    assert metadata.decode_gps({}) is None

@@ -99,3 +99,28 @@ def _format_datetime(value: object) -> str:
     date_part, _, time_part = s.partition(" ")
     date_part = date_part.replace(":", "-")
     return f"{date_part} {time_part}".strip()
+
+
+def _gps_to_decimal(coord: object, ref: object) -> float | None:
+    """Convert a (deg, min, sec) rational triple + hemisphere ref to decimal degrees."""
+    try:
+        d = _to_float(coord[0])  # type: ignore[index]
+        m = _to_float(coord[1])  # type: ignore[index]
+        s = _to_float(coord[2])  # type: ignore[index]
+    except (TypeError, IndexError, KeyError):
+        return None
+    if d is None or m is None or s is None:
+        return None
+    dec = d + m / 60 + s / 3600
+    if ref in ("S", "W"):
+        dec = -dec
+    return dec
+
+
+def decode_gps(gps_ifd: dict[int, object]) -> tuple[float, float] | None:
+    """Decode a GPS IFD into a (latitude, longitude) decimal-degree pair, or None."""
+    lat = _gps_to_decimal(gps_ifd.get(2), gps_ifd.get(1))
+    lon = _gps_to_decimal(gps_ifd.get(4), gps_ifd.get(3))
+    if lat is None or lon is None:
+        return None
+    return (lat, lon)
