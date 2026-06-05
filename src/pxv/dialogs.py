@@ -16,6 +16,7 @@ KEYBINDINGS: list[tuple[str, str]] = [
     ("u", "Uncrop (undo last crop)"),
     ("n", "Zoom to 1:1 (normal)"),
     ("e", "Open enhancements dialog"),
+    ("i", "Show image info / EXIF"),
     (",", "Reduce zoom 10%"),
     (".", "Increase zoom 10%"),
     ("<", "Halve zoom"),

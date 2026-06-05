@@ -46,6 +46,8 @@ class ContextMenu:
         self.menu.add_command(label="Print", command=lambda: commands.cmd_print(app))
         self.menu.add_separator()
 
+        self.menu.add_command(label="Info...", command=lambda: commands.cmd_info(app))
+        self.menu.add_separator()
         self.menu.add_command(
             label="Enhancements...", command=lambda: commands.cmd_enhancement_dialog(app)
         )

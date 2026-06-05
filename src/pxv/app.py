@@ -21,6 +21,7 @@ from pxv.image_model import ImageModel
 
 if TYPE_CHECKING:
     from pxv.enhancement_dialog import EnhancementDialog
+    from pxv.info_dialog import InfoDialog
 
 
 # AIDEV-NOTE: Tkinter's winfo_screenwidth/height returns the total virtual desktop
@@ -82,6 +83,8 @@ class PxvApp:
 
         # Will be set if the enhancement dialog is open
         self.enhancement_dialog: EnhancementDialog | None = None
+        # Will be set if the info / EXIF dialog is open
+        self.info_dialog: InfoDialog | None = None
         # AIDEV-NOTE: Toggles transparent-area compositing between white and black.
         # Only affects display; saving always uses the true alpha channel.
         self.dark_background: bool = False
@@ -149,6 +152,7 @@ class PxvApp:
         self.root.bind("<Left>", lambda _: commands.cmd_prev_image(self))
         self.root.bind("<Escape>", lambda _: self.canvas_view.clear_selection())
         self.root.bind("<question>", lambda _: commands.cmd_help(self))
+        self.root.bind("<Key-i>", lambda _: commands.cmd_info(self))
 
     def _bind_configure(self) -> None:
         """Debounced handler for window resize events."""
@@ -194,6 +198,8 @@ class PxvApp:
         self.enhancement_params.reset()
         if self.enhancement_dialog is not None:
             self.enhancement_dialog.sync_sliders_from_params()
+        if self.info_dialog is not None:
+            self.info_dialog.refresh()
         self.canvas_view.clear_selection()
 
         # Fit to current monitor on load
