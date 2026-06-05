@@ -55,8 +55,12 @@ strict = true
 module = "PIL.*"
 ignore_missing_imports = true
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [dependency-groups]
 dev = [
     "mypy>=1.20.0",
+    "pytest>=9.0.3",
     "ruff>=0.15.9",
 ]
