@@ -110,4 +110,7 @@ jobs:
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/pxv_*_all.deb --clobber
+        # AIDEV-NOTE: This job has no checkout, so gh cannot infer the repo from
+        # a local git remote — pass it explicitly via --repo or gh fails with
+        # "fatal: not a git repository".
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/pxv_*_all.deb --clobber --repo "${{ github.repository }}"
