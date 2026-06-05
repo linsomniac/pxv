@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-06-05
+
+Adds a `--version` flag and official Debian packaging.
+
 ### Added
 
 - `--version` command-line flag that prints the installed version and exits.
