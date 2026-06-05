@@ -1,0 +1,113 @@
+name: Debian package
+
+on:
+  release:
+    types: [published]
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege by default; only the upload job opts into contents: write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & validate .deb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Debian build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential debhelper dh-python python3-all python3-installer \
+            desktop-file-utils devscripts lintian
+
+      - name: Verify tag matches project version
+        if: github.event_name == 'release'
+        run: |
+          PROJECT_VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/version = "([^"]+)".*/\1/')
+          TAG="${GITHUB_REF##*/}"
+          TAG_VERSION="${TAG#v}"
+          if [ "$PROJECT_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag version ($TAG_VERSION) != pyproject version ($PROJECT_VERSION)" >&2
+            exit 1
+          fi
+
+      - name: Generate debian/changelog
+        run: ./debian/gen-changelog.sh
+
+      - name: Build .deb
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          mv ../pxv_*_all.deb dist/
+
+      - name: Inspect package
+        run: |
+          set -euxo pipefail
+          DEB=$(ls dist/pxv_*_all.deb)
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB"
+          dpkg-deb --contents "$DEB" | grep -E ' \./usr/bin/pxv$'
+          dpkg-deb --contents "$DEB" | grep -E '\.desktop$'
+          dpkg-deb --contents "$DEB" | grep -E '/icons/.*\.svg$'
+
+      - name: Lintian
+        run: |
+          set -euxo pipefail
+          DEB=$(ls dist/pxv_*_all.deb)
+          lintian -I --pedantic "$DEB" || true
+          lintian --fail-on error --suppress-tags no-manual-page "$DEB"
+
+      - name: Install with dependency resolution
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y "./$(ls dist/pxv_*_all.deb)"
+
+      - name: Smoke test (headless)
+        run: |
+          set -euxo pipefail
+          command -v pxv
+          test -x /usr/bin/pxv
+          python3 -c "import pxv, tkinter, PIL.ImageTk; print('imports OK')"
+          pxv --version
+          pxv --help
+          test -f /usr/share/applications/pxv.desktop
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: dist/pxv_*_all.deb
+
+  upload:
+    name: Attach .deb to release
+    needs: build
+    if: ${{ github.event_name == 'release' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: dist/
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/pxv_*_all.deb --clobber
