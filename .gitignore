@@ -4,3 +4,13 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Debian build artifacts
+/debian/changelog
+/debian/tmp-wheel/
+/debian/pxv/
+/debian/.debhelper/
+/debian/files
+/debian/debhelper-build-stamp
+/debian/*.substvars
+/debian/*.debhelper.log

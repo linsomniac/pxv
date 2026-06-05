@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+export PYBUILD_NAME=pxv
+
+# AIDEV-NOTE: Debian's patched Python defaults to the "posix_local" sysconfig
+# scheme, so `installer --prefix=/usr` would drop files under /usr/local (and
+# trip dh_usrlocal). Force the system layout: /usr/bin + /usr/lib/python3/
+# dist-packages, which is exactly what dh_python3 expects.
+export DEB_PYTHON_INSTALL_LAYOUT = deb_system
+
+WHEELDIR := debian/tmp-wheel
+
+%:
+	dh $@ --with python3
+
+override_dh_auto_build:
+	rm -rf $(WHEELDIR)
+	uv build --wheel --no-cache --out-dir $(WHEELDIR)
+
+override_dh_auto_install:
+	python3 -m installer --destdir=debian/pxv --prefix=/usr $(WHEELDIR)/pxv-*.whl
+
+override_dh_install:
+	dh_install
+	desktop-file-validate debian/pxv/usr/share/applications/pxv.desktop
+
+override_dh_auto_test:
+	:
+
+override_dh_clean:
+	rm -rf $(WHEELDIR) dist *.egg-info
+	dh_clean

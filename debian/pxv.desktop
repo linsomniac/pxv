@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=pxv
+GenericName=Image Viewer
+Comment=View and manipulate images, a Python clone of xv
+Exec=pxv %F
+TryExec=pxv
+Icon=pxv
+Terminal=false
+Categories=Graphics;Viewer;2DGraphics;RasterGraphics;
+MimeType=image/png;image/jpeg;image/gif;image/bmp;image/tiff;image/webp;
+Keywords=image;viewer;photo;picture;xv;

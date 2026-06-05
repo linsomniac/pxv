@@ -1,0 +1,22 @@
+Source: pxv
+Section: graphics
+Priority: optional
+Maintainer: Sean Reifschneider <jafo00@gmail.com>
+Build-Depends: debhelper-compat (= 13), dh-python, python3-all,
+ python3-installer, desktop-file-utils
+Standards-Version: 4.7.0
+Homepage: https://github.com/linsomniac/pxv
+Rules-Requires-Root: no
+
+Package: pxv
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}, python3-tk, python3-pil.imagetk
+Recommends: gnome-screenshot | grim | spectacle
+Suggests: xclip | wl-clipboard
+Description: Python clone of the classic Unix xv image viewer
+ pxv is a lightweight Tkinter image viewer and light editor inspired by John
+ Bradley's xv. It supports viewing and navigating a directory of images,
+ zoom and pan, cropping, and basic enhancements such as brightness, contrast,
+ and filters.
+ .
+ This package installs the pxv command and a desktop launcher.

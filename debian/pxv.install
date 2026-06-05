@@ -1,0 +1,2 @@
+debian/pxv.desktop usr/share/applications
+debian/pxv.svg     usr/share/icons/hicolor/scalable/apps
