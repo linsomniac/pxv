@@ -287,6 +287,11 @@ def get_editable(meta: ImageMetadata, key: str) -> str:
     for k, _label, ifd, tag in EDITABLE_FIELDS:
         if k == key:
             value = _field_container(meta.exif, ifd).get(tag, "")
+            if not value and key == "date":
+                # AIDEV-NOTE: spec — the Date field falls back to IFD0 DateTime for
+                # display when DateTimeOriginal is absent (writes still target
+                # DateTimeOriginal via set_editable).
+                value = meta.exif.get(_DATETIME, "")
             return str(value) if value else ""
     return ""
 

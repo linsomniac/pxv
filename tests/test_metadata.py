@@ -231,3 +231,12 @@ def test_set_editable_empty_clears(make_exif, tmp_path: Path) -> None:
 def test_editable_fields_keys() -> None:
     keys = [key for key, _label, _ifd, _tag in metadata.EDITABLE_FIELDS]
     assert keys == ["description", "artist", "copyright", "date"]
+
+
+def test_get_editable_date_falls_back_to_datetime(tmp_path: Path) -> None:
+    # Image carrying IFD0 DateTime but no Exif sub-IFD DateTimeOriginal.
+    ex = Image.new("RGB", (4, 4)).getexif()
+    ex[0x0132] = "2021:05:06 07:08:09"
+    meta = _meta(ex, tmp_path)
+    assert metadata.get_editable(meta, "date") == "2021:05:06 07:08:09"
+    assert metadata.get_editable(meta, "description") == ""

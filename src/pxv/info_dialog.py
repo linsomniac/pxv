@@ -120,7 +120,7 @@ class InfoDialog(tk.Toplevel):
         tree.heading("value", text="Value")
         tree.column("name", width=160, anchor=tk.W)
         tree.column("value", width=260, anchor=tk.W)
-        for tag_id, name, value in rows:
+        for _tag_id, name, value in rows:
             tree.insert("", tk.END, values=(name, value))
         scroll = ttk.Scrollbar(self._tags_frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
