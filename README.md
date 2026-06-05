@@ -60,6 +60,7 @@ applications menu and image "Open with" lists.
 | `T` | Rotate counterclockwise |
 | `D` | Toggle dark/light background |
 | `e` | Enhancement dialog |
+| `i` | Show image info / EXIF |
 | `Ctrl+s` | Save as |
 | `Escape` | Clear selection |
 | `q` | Quit |

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Image info / EXIF panel (`i` or right-click → Info): view file facts and decoded
+  camera, exposure, capture-date, and GPS metadata; edit Description / Artist /
+  Copyright / Date; remove GPS; and opt in to "keep metadata on save". Saving still
+  strips metadata by default.
+
 ## [1.0.2] - 2026-06-05
 
 Adds a `--version` flag and official Debian packaging.
