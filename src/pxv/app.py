@@ -274,6 +274,12 @@ class PxvApp:
 def main() -> None:
     """Entry point: parse args, create app, run main loop."""
     parser = argparse.ArgumentParser(description="pxv - A Python xv image viewer")
+    # AIDEV-NOTE: Imported lazily (not at module top) because app.py is imported
+    # during pxv/__init__ before __version__ is assigned — a top-level import
+    # would be circular. Mirrors commands.py's local import.
+    from pxv import __version__
+
+    parser.add_argument("--version", action="version", version=f"pxv {__version__}")
     parser.add_argument("paths", nargs="*", help="Image files or directories to open")
     args = parser.parse_args()
 
