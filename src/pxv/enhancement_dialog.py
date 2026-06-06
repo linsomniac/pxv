@@ -135,8 +135,15 @@ class EnhancementDialog(tk.Toplevel):
         """Bake current enhancements into the working image, then reset sliders.
 
         AIDEV-NOTE: This is the xv "Apply" behavior — enhancements become permanent
-        part of the working image, and sliders return to identity defaults.
+        part of the working image, and sliders return to identity defaults. The
+        pre-bake state (pixels + the to-be-baked slider values) is recorded for
+        undo first; nothing is recorded or baked when the sliders are at identity.
         """
+        if self.app.image_model.working_image is None:
+            return
+        if self.app.enhancement_params.is_identity():
+            return
+        self.app.record_history()
         save_img = self.app.image_model.get_save_image(self.app.enhancement_params)
         if save_img is not None:
             self.app.image_model.working_image = save_img

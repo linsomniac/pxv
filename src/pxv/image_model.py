@@ -26,9 +26,9 @@ class ImageModel:
         self._current_path: Path | None = None
         self._original_rgba: Image.Image | None = None
         self._save_rgba: Image.Image | None = None
-        # AIDEV-NOTE: Pre-crop state for uncrop (one level of undo)
-        self._pre_crop_working: Image.Image | None = None
-        self._pre_crop_rgba: Image.Image | None = None
+        # AIDEV-NOTE: Multi-level undo/redo lives in PxvApp via history.py
+        # (snapshots also capture app-level enhancement params). The model only
+        # exposes snapshot_buffers()/restore_buffers() for the image buffers.
         # AIDEV-NOTE: EXIF/metadata captured at load. keep_metadata gates whether it
         # is written on Save As; default False preserves pxv's historical strip-on-save.
         self.metadata: metadata.ImageMetadata | None = None
@@ -100,13 +100,11 @@ class ImageModel:
     def crop(self, box: tuple[int, int, int, int]) -> None:
         """Crop working image to (left, upper, right, lower).
 
-        AIDEV-NOTE: Saves pre-crop state so uncrop() can restore it.
-        Only one level of undo is supported.
+        AIDEV-NOTE: Pure mutator. Undo is handled at the app layer, which records
+        a snapshot before invoking this (see commands.cmd_crop / history.py).
         """
         if self.working_image is None:
             return
-        self._pre_crop_working = self.working_image.copy()
-        self._pre_crop_rgba = self._save_rgba.copy() if self._save_rgba is not None else None
         self.working_image = self.working_image.crop(box)
         if self._save_rgba is not None:
             self._save_rgba = self._save_rgba.crop(box)
@@ -233,15 +231,25 @@ class ImageModel:
             return None  # already tight, nothing to crop
         return box
 
-    def uncrop(self) -> bool:
-        """Restore the pre-crop image state. Returns True if uncrop was performed."""
-        if self._pre_crop_working is None:
-            return False
-        self.working_image = self._pre_crop_working
-        self._save_rgba = self._pre_crop_rgba
-        self._pre_crop_working = None
-        self._pre_crop_rgba = None
-        return True
+    def snapshot_buffers(self) -> tuple[Image.Image, Image.Image | None] | None:
+        """Deep-copy (working_image, _save_rgba) for the undo stack.
+
+        Returns None when no image is loaded. The copies are independent of the
+        live buffers, so later in-place changes never disturb a stored snapshot.
+        """
+        if self.working_image is None:
+            return None
+        rgba = self._save_rgba.copy() if self._save_rgba is not None else None
+        return (self.working_image.copy(), rgba)
+
+    def restore_buffers(self, working: Image.Image, save_rgba: Image.Image | None) -> None:
+        """Install image buffers from a snapshot.
+
+        AIDEV-NOTE: No copy here — the caller (PxvApp.undo/redo) owns the popped
+        snapshot and does not retain it, so transferring ownership is safe.
+        """
+        self.working_image = working
+        self._save_rgba = save_rgba
 
     def rotate(self, degrees: int) -> None:
         """Rotate working image by 90, 180, or 270 degrees."""

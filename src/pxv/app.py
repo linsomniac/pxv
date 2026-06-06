@@ -10,6 +10,7 @@ import argparse
 import re
 import subprocess
 import tkinter as tk
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from pxv import commands
@@ -17,6 +18,7 @@ from pxv.canvas_view import CanvasView
 from pxv.context_menu import ContextMenu
 from pxv.enhancements import EnhancementParams
 from pxv.file_list import FileList, expand_paths
+from pxv.history import History, Snapshot
 from pxv.image_model import ImageModel
 from pxv.save_options import SaveOptions
 from pxv.slideshow import DEFAULT_SLIDESHOW_SECONDS, adjusted_interval_ms, interval_to_ms
@@ -85,6 +87,10 @@ class PxvApp:
         # AIDEV-NOTE: Session-remembered Save As encoding options (JPEG quality,
         # PNG level, WebP lossless/quality, TIFF compression). Reset on restart.
         self.save_options = SaveOptions()
+        # AIDEV-NOTE: Multi-level undo/redo. A snapshot is the full document state
+        # (image buffers + enhancement params), captured before each destructive
+        # edit and on undo/redo (see snapshot_state/_restore_snapshot below).
+        self.history = History()
 
         # Will be set if the enhancement dialog is open
         self.enhancement_dialog: EnhancementDialog | None = None
@@ -148,7 +154,10 @@ class PxvApp:
         self.root.bind("<Key-q>", lambda _: commands.cmd_quit(self))
         self.root.bind("<Key-c>", lambda _: commands.cmd_crop(self))
         self.root.bind("<Key-A>", lambda _: commands.cmd_autocrop(self))
-        self.root.bind("<Key-u>", lambda _: commands.cmd_uncrop(self))
+        self.root.bind("<Key-u>", lambda _: commands.cmd_undo(self))
+        self.root.bind("<Control-z>", lambda _: commands.cmd_undo(self))
+        self.root.bind("<Control-y>", lambda _: commands.cmd_redo(self))
+        self.root.bind("<Control-Shift-Z>", lambda _: commands.cmd_redo(self))
         self.root.bind("<Key-n>", lambda _: commands.cmd_zoom_normal(self))
         self.root.bind("<Key-e>", lambda _: commands.cmd_enhancement_dialog(self))
         self.root.bind("<Key-comma>", lambda _: commands.cmd_zoom_reduce(self))
@@ -240,6 +249,8 @@ class PxvApp:
             return False
 
         self.enhancement_params.reset()
+        # AIDEV-NOTE: A freshly loaded image starts with empty undo/redo history.
+        self.history.clear()
         if self.enhancement_dialog is not None:
             self.enhancement_dialog.sync_sliders_from_params()
         if self.info_dialog is not None:
@@ -283,6 +294,56 @@ class PxvApp:
 
     def _bg_color(self) -> tuple[int, int, int]:
         return (0, 0, 0) if self.dark_background else (255, 255, 255)
+
+    # --- undo / redo ----------------------------------------------------
+
+    def snapshot_state(self) -> Snapshot | None:
+        """Capture the full editable document state, or None if no image is loaded."""
+        buffers = self.image_model.snapshot_buffers()
+        if buffers is None:
+            return None
+        working, save_rgba = buffers
+        return Snapshot(working, save_rgba, replace(self.enhancement_params))
+
+    def record_history(self) -> None:
+        """Record the current state onto the undo stack before a destructive edit."""
+        snap = self.snapshot_state()
+        if snap is not None:
+            self.history.record(snap)
+
+    def undo(self) -> None:
+        if not self.history.can_undo:
+            self.show_temp_title("pxv: nothing to undo")
+            return
+        current = self.snapshot_state()
+        if current is None:
+            return
+        restored = self.history.undo(current)
+        if restored is not None:
+            self._restore_snapshot(restored)
+
+    def redo(self) -> None:
+        if not self.history.can_redo:
+            self.show_temp_title("pxv: nothing to redo")
+            return
+        current = self.snapshot_state()
+        if current is None:
+            return
+        restored = self.history.redo(current)
+        if restored is not None:
+            self._restore_snapshot(restored)
+
+    def _restore_snapshot(self, snap: Snapshot) -> None:
+        """Install a snapshot as the live document state and redraw (zoom preserved)."""
+        self.image_model.restore_buffers(snap.working_image, snap.save_rgba)
+        # AIDEV-NOTE: Replace (don't mutate) the params object — every consumer
+        # dereferences app.enhancement_params fresh, so a new object is safe and
+        # leaves the snapshot's copy untouched.
+        self.enhancement_params = replace(snap.params)
+        if self.enhancement_dialog is not None:
+            self.enhancement_dialog.sync_sliders_from_params()
+        self.canvas_view.clear_selection()
+        self.refresh_display()
 
     def refresh_display(self) -> None:
         """Re-render the image with current zoom and enhancement params."""

@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fullscreen presentation mode: press `f` or `F11` (or launch with `--fullscreen`)
   to show the image centered on black with no window chrome. `Escape` leaves
   slideshow/fullscreen before falling back to clearing the selection.
+- Multi-level undo/redo: crop, autocrop, rotate, flip, resize, and enhancement
+  "Apply" (slider values included) can now all be undone and redone. Press `u` or
+  `Ctrl+Z` to undo and `Ctrl+Y` / `Ctrl+Shift+Z` to redo; Undo/Redo are also in the
+  right-click menu. This replaces the previous single-level "uncrop" (`u` is now a
+  general undo); Reset and loading a new image start a fresh history.
 
 ## [1.0.3] - 2026-06-05
 

@@ -21,6 +21,10 @@ class ContextMenu:
         self.menu.add_command(label="Save As...", command=lambda: commands.cmd_save_as(app))
         self.menu.add_separator()
 
+        self.menu.add_command(label="Undo", command=lambda: commands.cmd_undo(app))
+        self.menu.add_command(label="Redo", command=lambda: commands.cmd_redo(app))
+        self.menu.add_separator()
+
         self.menu.add_command(label="Crop", command=lambda: commands.cmd_crop(app))
         self.menu.add_command(label="Autocrop", command=lambda: commands.cmd_autocrop(app))
         self.menu.add_command(label="Resize...", command=lambda: commands.cmd_resize(app))

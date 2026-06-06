@@ -184,6 +184,7 @@ def cmd_crop(app: PxvApp) -> None:
     box = app.canvas_view.get_selection_image_coords(app.image_model.get_working_size())
     if box is None:
         return
+    app.record_history()
     app.image_model.crop(box)
     app.canvas_view.clear_selection()
     app.refresh_display()
@@ -198,6 +199,7 @@ def cmd_resize(app: PxvApp) -> None:
         return
     new_size = resize_dialog(app.root, current_size)
     if new_size is not None:
+        app.record_history()
         app.image_model.resize(new_size)
         app.canvas_view.clear_selection()
         app.refresh_display()
@@ -207,6 +209,7 @@ def cmd_reset(app: PxvApp) -> None:
     """Reset to original image and clear enhancements."""
     app.image_model.reset()
     app.enhancement_params.reset()
+    app.history.clear()
     app.canvas_view.clear_selection()
     if app.enhancement_dialog is not None:
         app.enhancement_dialog.sync_sliders_from_params()
@@ -215,18 +218,21 @@ def cmd_reset(app: PxvApp) -> None:
 
 def cmd_rotate(app: PxvApp, degrees: int) -> None:
     """Rotate working image by 90, 180, or 270 degrees."""
+    app.record_history()
     app.image_model.rotate(degrees)
     app.canvas_view.clear_selection()
     app.refresh_display()
 
 
 def cmd_flip_horizontal(app: PxvApp) -> None:
+    app.record_history()
     app.image_model.flip_horizontal()
     app.canvas_view.clear_selection()
     app.refresh_display()
 
 
 def cmd_flip_vertical(app: PxvApp) -> None:
+    app.record_history()
     app.image_model.flip_vertical()
     app.canvas_view.clear_selection()
     app.refresh_display()
@@ -340,7 +346,12 @@ def cmd_autocrop(app: PxvApp) -> None:
     """Auto-crop uniform background borders from the image."""
     if app.image_model.working_image is None:
         return
+    # AIDEV-NOTE: Capture before cropping, but only record if it actually crops \u2014
+    # otherwise an undo entry would appear for a no-op autocrop.
+    snap = app.snapshot_state()
     if app.image_model.autocrop():
+        if snap is not None:
+            app.history.record(snap)
         app.canvas_view.clear_selection()
         app.refresh_display()
     else:
@@ -348,11 +359,14 @@ def cmd_autocrop(app: PxvApp) -> None:
         app.show_temp_title("pxv: Autocrop \u2013 nothing to crop")
 
 
-def cmd_uncrop(app: PxvApp) -> None:
-    """Undo the last crop operation."""
-    if app.image_model.uncrop():
-        app.canvas_view.clear_selection()
-        app.refresh_display()
+def cmd_undo(app: PxvApp) -> None:
+    """Undo the last destructive edit (crop, rotate, flip, resize, Apply)."""
+    app.undo()
+
+
+def cmd_redo(app: PxvApp) -> None:
+    """Redo the last undone edit."""
+    app.redo()
 
 
 def cmd_next_image(app: PxvApp) -> None:

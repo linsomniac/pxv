@@ -104,17 +104,14 @@ def test_load_opaque_jpeg_has_no_save_buffer(tmp_path: Path) -> None:
     assert model.working_image.mode == "RGB"
 
 
-# --- crop / uncrop -----------------------------------------------------------
+# --- crop --------------------------------------------------------------------
 
 
-def test_crop_then_uncrop_restores_one_level() -> None:
+def test_crop_reduces_working_size() -> None:
     model = ImageModel()
     model.working_image = Image.new("RGB", (10, 10), (10, 20, 30))
     model.crop((2, 2, 8, 8))
     assert model.get_working_size() == (6, 6)
-    assert model.uncrop() is True
-    assert model.get_working_size() == (10, 10)
-    assert model.uncrop() is False  # only one level of undo
 
 
 def test_crop_applies_to_save_rgba() -> None:
@@ -125,9 +122,55 @@ def test_crop_applies_to_save_rgba() -> None:
     assert model.get_working_size() == (5, 5)
     assert model._save_rgba is not None
     assert model._save_rgba.size == (5, 5)
-    model.uncrop()
-    assert model._save_rgba is not None
-    assert model._save_rgba.size == (10, 10)
+
+
+# --- snapshot_buffers / restore_buffers (undo/redo support) ------------------
+
+
+def test_snapshot_buffers_returns_independent_copies() -> None:
+    model = ImageModel()
+    model.working_image = Image.new("RGB", (4, 3), (10, 20, 30))
+    model._save_rgba = Image.new("RGBA", (4, 3), (10, 20, 30, 128))
+    snap = model.snapshot_buffers()
+    assert snap is not None
+    working, save_rgba = snap
+    assert working is not model.working_image  # a copy, not the live object
+    assert working.size == (4, 3)
+    assert save_rgba is not None and save_rgba.size == (4, 3)
+    # Mutating the model afterward must not disturb the captured snapshot.
+    model.working_image = model.working_image.crop((0, 0, 2, 2))
+    assert working.size == (4, 3)
+
+
+def test_snapshot_buffers_opaque_has_no_save_rgba() -> None:
+    model = ImageModel()
+    model.working_image = Image.new("RGB", (2, 2), (1, 2, 3))
+    snap = model.snapshot_buffers()
+    assert snap is not None
+    _working, save_rgba = snap
+    assert save_rgba is None
+
+
+def test_snapshot_buffers_none_when_no_image() -> None:
+    assert ImageModel().snapshot_buffers() is None
+
+
+def test_restore_buffers_installs_given_buffers() -> None:
+    model = ImageModel()
+    model.working_image = Image.new("RGB", (2, 2), (0, 0, 0))
+    w = Image.new("RGB", (5, 5), (9, 9, 9))
+    rgba = Image.new("RGBA", (5, 5), (9, 9, 9, 200))
+    model.restore_buffers(w, rgba)
+    assert model.working_image is w
+    assert model._save_rgba is rgba
+
+
+def test_restore_buffers_can_clear_save_rgba() -> None:
+    model = ImageModel()
+    model.working_image = Image.new("RGB", (2, 2), (0, 0, 0))
+    model._save_rgba = Image.new("RGBA", (2, 2), (0, 0, 0, 255))
+    model.restore_buffers(Image.new("RGB", (3, 3), (1, 1, 1)), None)
+    assert model._save_rgba is None
 
 
 # --- autocrop ----------------------------------------------------------------
