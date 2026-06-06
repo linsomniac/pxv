@@ -158,6 +158,11 @@ class EnhancementDialog(tk.Toplevel):
             self._refresh_after_id = None
         self.app.enhancement_dialog = None
         self.destroy()
+        # AIDEV-NOTE: Reclaim keyboard focus for the main window AFTER teardown —
+        # same non-modal-transient focus bug as InfoDialog (see
+        # PxvApp.restore_main_focus). destroy() clears the input focus this dialog
+        # held, so the reclaim must follow it or the app appears locked up.
+        self.app.restore_main_focus()
 
     def sync_sliders_from_params(self) -> None:
         """Set all slider values from the current EnhancementParams.

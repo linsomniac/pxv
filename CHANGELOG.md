@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Copyright / Date; remove GPS; and opt in to "keep metadata on save". Saving still
   strips metadata by default.
 
+### Fixed
+- Closing the info/EXIF panel (or the enhancement panel) with its **Close** button
+  no longer leaves the app keyboard-unresponsive. Because all shortcuts are bound to
+  the main window, closing a non-modal dialog now explicitly returns keyboard focus
+  to it; clicking the image also re-arms the shortcuts.
+
 ## [1.0.2] - 2026-06-05
 
 Adds a `--version` flag and official Debian packaging.

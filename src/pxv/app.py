@@ -178,6 +178,29 @@ class PxvApp:
     def _on_right_click(self, event: tk.Event) -> None:
         self.context_menu.show(event)
 
+    def restore_main_focus(self) -> None:
+        """Force keyboard focus back to the image canvas after a dialog closes.
+
+        AIDEV-NOTE: Every shortcut is bound on self.root (see _bind_keys), so a
+        key only fires while a widget in root's bindtag chain holds the input
+        focus. The info/enhancement panels are non-modal transients with NO
+        grab_set, so closing one does not reliably return X input focus to the
+        main window: under click-to-focus root never received a click, and under
+        focus-follows-mouse the pointer is over the just-closed dialog (which
+        opens BESIDE the main window). The app then looks "locked up" — every key
+        binding is dead while pointer/rubber-band events still work. focus_force()
+        (not focus_set()) is required: focus_set silently defers until the app
+        next gains WM focus, which is exactly the state that was lost, whereas
+        focus_force reclaims it immediately under both focus models. Guarded so a
+        close during teardown is a safe no-op.
+
+        Call this AFTER the dialog's destroy(): destroying a Toplevel that holds
+        the input focus clears the focus, which would undo a pre-destroy reclaim.
+        """
+        canvas = self.canvas_view.canvas
+        if canvas.winfo_exists():
+            canvas.focus_force()
+
     def load_current(self) -> bool:
         """Load the current file from the file list. Returns True on success.
 

@@ -170,5 +170,11 @@ class InfoDialog(tk.Toplevel):
             self.refresh()
 
     def _on_close(self) -> None:
+        # AIDEV-NOTE: Closing via the "Close" button (a pointer action) otherwise
+        # leaves the app keyboard-dead — every root-bound shortcut stops firing
+        # while mouse/rubber-band events keep working. destroy() clears the input
+        # focus this dialog held, so the focus reclaim MUST come AFTER destroy().
+        # See PxvApp.restore_main_focus.
         self.app.info_dialog = None
         self.destroy()
+        self.app.restore_main_focus()

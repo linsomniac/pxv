@@ -217,6 +217,11 @@ class CanvasView:
         return (int(cx), int(cy))
 
     def _on_press(self, event: tk.Event) -> None:
+        # AIDEV-NOTE: Take keyboard focus on click so the root-bound shortcuts are
+        # re-armed if focus was somehow lost (defense in depth alongside
+        # PxvApp.restore_main_focus). A real click means the main window is
+        # gaining focus anyway, so cooperative focus_set suffices here.
+        self.canvas.focus_set()
         self.clear_selection()
         self._rb_start = self._canvas_xy(event)
 
