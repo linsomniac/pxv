@@ -59,10 +59,13 @@ applications menu and image "Open with" lists.
 | `t` | Rotate clockwise |
 | `T` | Rotate counterclockwise |
 | `D` | Toggle dark/light background |
+| `f` / `F11` | Toggle fullscreen |
+| `s` | Toggle slideshow |
+| `+` / `-` | Slideshow interval +/- 1s |
 | `e` | Enhancement dialog |
 | `i` | Show image info / EXIF |
 | `Ctrl+s` | Save as |
-| `Escape` | Clear selection |
+| `Escape` | Exit slideshow/fullscreen, or clear selection |
 | `q` | Quit |
 
 Right-click for additional options: rotate, flip, resize, grab (screenshot), print, and more.
@@ -82,6 +85,7 @@ The enhancement dialog (`e`) provides real-time adjustment of:
 - Multi-monitor aware: detects per-monitor geometry via xrandr so windows don't span displays
 - EXIF-aware orientation
 - Save-options dialog for JPEG/PNG/WebP/TIFF (quality, compression, lossless, keep-metadata)
+- Slideshow auto-advance (`--slideshow[=SECS]`) and fullscreen presentation mode (`--fullscreen`)
 - Rubber-band selection for cropping
 - Wrap-around file navigation
 - Supports PNG, JPEG, BMP, TIFF, GIF, WebP, PPM, PGM, PBM, ICO

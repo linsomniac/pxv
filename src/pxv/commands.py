@@ -402,6 +402,26 @@ def cmd_enhancement_dialog(app: PxvApp) -> None:
     app.enhancement_dialog = EnhancementDialog(app)
 
 
+def cmd_toggle_fullscreen(app: PxvApp) -> None:
+    """Toggle borderless fullscreen presentation mode."""
+    app.toggle_fullscreen()
+
+
+def cmd_toggle_slideshow(app: PxvApp) -> None:
+    """Start or stop the auto-advance slideshow."""
+    app.toggle_slideshow()
+
+
+def cmd_slideshow_adjust(app: PxvApp, delta_seconds: float) -> None:
+    """Adjust the slideshow interval by +/- seconds."""
+    app.adjust_slideshow_interval(delta_seconds)
+
+
+def cmd_escape(app: PxvApp) -> None:
+    """Escape key: exit presentation modes if active, else clear the selection."""
+    app.escape_action()
+
+
 def cmd_toggle_background(app: PxvApp) -> None:
     """Toggle transparent image background between dark and light."""
     app.dark_background = not app.dark_background

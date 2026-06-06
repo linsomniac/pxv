@@ -29,12 +29,15 @@ KEYBINDINGS: list[tuple[str, str]] = [
     (">", "Double zoom"),
     ("M", "Zoom to fill display"),
     ("D", "Toggle dark/light background"),
+    ("f / F11", "Toggle fullscreen"),
+    ("s", "Toggle slideshow"),
+    ("+ / -", "Slideshow interval +/- 1s"),
     ("t", "Rotate clockwise"),
     ("T", "Rotate counterclockwise"),
     ("Ctrl+S", "Save As..."),
     ("Space / Right", "Next image"),
     ("Backspace / Left", "Previous image"),
-    ("Escape", "Clear selection"),
+    ("Escape", "Exit slideshow/fullscreen, or clear selection"),
     ("Right-click", "Context menu"),
 ]
 

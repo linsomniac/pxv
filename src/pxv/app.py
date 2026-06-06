@@ -19,6 +19,7 @@ from pxv.enhancements import EnhancementParams
 from pxv.file_list import FileList, expand_paths
 from pxv.image_model import ImageModel
 from pxv.save_options import SaveOptions
+from pxv.slideshow import DEFAULT_SLIDESHOW_SECONDS, adjusted_interval_ms, interval_to_ms
 
 if TYPE_CHECKING:
     from pxv.enhancement_dialog import EnhancementDialog
@@ -93,6 +94,15 @@ class PxvApp:
         # Only affects display; saving always uses the true alpha channel.
         self.dark_background: bool = False
 
+        # AIDEV-NOTE: Presentation modes. In fullscreen the window stays screen-sized
+        # (refresh_display skips the resize-to-image) and the image is fit to the
+        # whole monitor. The slideshow drives cmd_next_image on a self-rescheduling
+        # after() timer tracked by _slideshow_after_id so stop/quit cancels cleanly.
+        self.fullscreen: bool = False
+        self.slideshow_active: bool = False
+        self.slideshow_interval_ms: int = interval_to_ms(DEFAULT_SLIDESHOW_SECONDS)
+        self._slideshow_after_id: str | None = None
+
         # Create canvas view (passes right-click handler)
         self.canvas_view = CanvasView(root, on_right_click=self._on_right_click)
 
@@ -154,9 +164,16 @@ class PxvApp:
         self.root.bind("<Right>", lambda _: commands.cmd_next_image(self))
         self.root.bind("<BackSpace>", lambda _: commands.cmd_prev_image(self))
         self.root.bind("<Left>", lambda _: commands.cmd_prev_image(self))
-        self.root.bind("<Escape>", lambda _: self.canvas_view.clear_selection())
+        self.root.bind("<Escape>", lambda _: commands.cmd_escape(self))
         self.root.bind("<question>", lambda _: commands.cmd_help(self))
         self.root.bind("<Key-i>", lambda _: commands.cmd_info(self))
+        self.root.bind("<Key-f>", lambda _: commands.cmd_toggle_fullscreen(self))
+        self.root.bind("<F11>", lambda _: commands.cmd_toggle_fullscreen(self))
+        self.root.bind("<Key-s>", lambda _: commands.cmd_toggle_slideshow(self))
+        self.root.bind("<plus>", lambda _: commands.cmd_slideshow_adjust(self, 1))
+        self.root.bind("<KP_Add>", lambda _: commands.cmd_slideshow_adjust(self, 1))
+        self.root.bind("<minus>", lambda _: commands.cmd_slideshow_adjust(self, -1))
+        self.root.bind("<KP_Subtract>", lambda _: commands.cmd_slideshow_adjust(self, -1))
 
     def _bind_configure(self) -> None:
         """Debounced handler for window resize events."""
@@ -229,13 +246,23 @@ class PxvApp:
             self.info_dialog.refresh()
         self.canvas_view.clear_selection()
 
-        # Fit to current monitor on load
-        max_w, max_h = self._get_max_image_size()
-        img_size = self.image_model.get_working_size()
-        self.canvas_view.zoom_fit(img_size, (max_w, max_h))
+        # Fit to the available area (monitor in fullscreen, else window-capped).
+        self._apply_fit()
 
         self.refresh_display()
         return True
+
+    def _apply_fit(self) -> None:
+        """Zoom-fit the working image to the available area.
+
+        Fullscreen fits to the whole monitor; otherwise to the window-capped size.
+        """
+        img_size = self.image_model.get_working_size()
+        if self.fullscreen:
+            bounds = _get_monitor_size(self.root)
+        else:
+            bounds = self._get_max_image_size()
+        self.canvas_view.zoom_fit(img_size, bounds)
 
     def show_temp_title(self, message: str, duration_ms: int = 2000) -> None:
         """Show a transient message in the title bar, then restore the real title.
@@ -266,8 +293,10 @@ class PxvApp:
         )
         if display_img is not None:
             # AIDEV-NOTE: Resize window BEFORE display() so the canvas has correct
-            # dimensions when centering the image.
-            self._resize_window_to_image(display_img.width, display_img.height)
+            # dimensions when centering the image. Skipped in fullscreen, where the
+            # window must stay screen-sized and the image is centered on black.
+            if not self.fullscreen:
+                self._resize_window_to_image(display_img.width, display_img.height)
             self.canvas_view.display(display_img)
         self._update_title()
 
@@ -303,18 +332,119 @@ class PxvApp:
         else:
             self.root.title("pxv")
 
+    # --- presentation modes ---------------------------------------------
+
+    def toggle_fullscreen(self) -> None:
+        """Toggle borderless fullscreen, re-fitting the image to the new area."""
+        self.set_fullscreen(not self.fullscreen)
+
+    def set_fullscreen(self, on: bool) -> None:
+        """Enter or leave fullscreen and re-fit/redraw the current image."""
+        self.fullscreen = on
+        # AIDEV-NOTE: Some WMs ignore -fullscreen; keep self.fullscreen authoritative
+        # so refresh_display/_apply_fit stay consistent regardless.
+        try:
+            self.root.attributes("-fullscreen", on)
+        except tk.TclError:
+            pass
+        self.root.update_idletasks()
+        self.canvas_view.clear_selection()
+        if self.image_model.working_image is not None:
+            self._apply_fit()
+            self.refresh_display()
+
+    def toggle_slideshow(self) -> None:
+        if self.slideshow_active:
+            self.stop_slideshow()
+        else:
+            self.start_slideshow()
+
+    def start_slideshow(self) -> None:
+        if self.slideshow_active:
+            return
+        self.slideshow_active = True
+        secs = self.slideshow_interval_ms // 1000
+        self.show_temp_title(f"pxv: slideshow on ({secs}s)")
+        self._schedule_slideshow()
+
+    def stop_slideshow(self) -> None:
+        if not self.slideshow_active:
+            return
+        self.slideshow_active = False
+        self._cancel_slideshow()
+        self.show_temp_title("pxv: slideshow off")
+
+    def _cancel_slideshow(self) -> None:
+        if self._slideshow_after_id is not None:
+            self.root.after_cancel(self._slideshow_after_id)
+            self._slideshow_after_id = None
+
+    def _schedule_slideshow(self) -> None:
+        self._slideshow_after_id = self.root.after(
+            self.slideshow_interval_ms, self._slideshow_tick
+        )
+
+    def _slideshow_tick(self) -> None:
+        # AIDEV-NOTE: Guard against a tick firing after the window is gone; reschedule
+        # only while still active so stop_slideshow()/quit ends the chain cleanly.
+        self._slideshow_after_id = None
+        if not self.slideshow_active or not self.root.winfo_exists():
+            return
+        commands.cmd_next_image(self)
+        if self.slideshow_active:
+            self._schedule_slideshow()
+
+    def adjust_slideshow_interval(self, delta_seconds: float) -> None:
+        """Change the slideshow interval by +/- seconds (clamped), live if running."""
+        self.slideshow_interval_ms = adjusted_interval_ms(
+            self.slideshow_interval_ms, delta_seconds
+        )
+        secs = self.slideshow_interval_ms // 1000
+        self.show_temp_title(f"pxv: slideshow {secs}s")
+        if self.slideshow_active:
+            self._cancel_slideshow()
+            self._schedule_slideshow()
+
+    def escape_action(self) -> None:
+        """Escape: leave presentation modes if active, else clear the selection."""
+        if self.slideshow_active or self.fullscreen:
+            if self.slideshow_active:
+                self.stop_slideshow()
+            if self.fullscreen:
+                self.set_fullscreen(False)
+            return
+        self.canvas_view.clear_selection()
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser.
+
+    AIDEV-NOTE: Extracted from main() so argument parsing is unit-testable without
+    constructing a Tk root. __version__ is imported lazily (not at module top)
+    because app.py is imported during pxv/__init__ before __version__ is assigned —
+    a top-level import would be circular. Mirrors commands.py's local import.
+    """
+    from pxv import __version__
+
+    parser = argparse.ArgumentParser(description="pxv - A Python xv image viewer")
+    parser.add_argument("--version", action="version", version=f"pxv {__version__}")
+    parser.add_argument(
+        "--slideshow",
+        nargs="?",
+        type=float,
+        const=DEFAULT_SLIDESHOW_SECONDS,
+        default=None,
+        metavar="SECS",
+        help="Start a slideshow, advancing every SECS seconds (default %(const)s).",
+    )
+    parser.add_argument("--fullscreen", action="store_true", help="Start in fullscreen mode.")
+    parser.add_argument("paths", nargs="*", help="Image files or directories to open")
+    return parser
+
 
 def main() -> None:
     """Entry point: parse args, create app, run main loop."""
-    parser = argparse.ArgumentParser(description="pxv - A Python xv image viewer")
-    # AIDEV-NOTE: Imported lazily (not at module top) because app.py is imported
-    # during pxv/__init__ before __version__ is assigned — a top-level import
-    # would be circular. Mirrors commands.py's local import.
-    from pxv import __version__
-
-    parser.add_argument("--version", action="version", version=f"pxv {__version__}")
-    parser.add_argument("paths", nargs="*", help="Image files or directories to open")
-    args = parser.parse_args()
+    args = _build_parser().parse_args()
 
     root = tk.Tk(className="pxv")
     root.title("pxv")
@@ -330,11 +460,25 @@ def main() -> None:
     file_list = FileList(paths)
     app = PxvApp(root, file_list)
 
+    if args.slideshow is not None:
+        app.slideshow_interval_ms = interval_to_ms(args.slideshow)
+
+    def _apply_startup_modes() -> None:
+        # AIDEV-NOTE: Applied after the first load so the image is fit to the right
+        # area (fullscreen changes the fit bounds) before the slideshow starts.
+        if not root.winfo_exists():
+            return
+        if args.fullscreen:
+            app.set_fullscreen(True)
+        if args.slideshow is not None:
+            app.start_slideshow()
+
     # AIDEV-NOTE: Deferred so the canvas has real dimensions once mainloop starts.
     # Guarded by winfo_exists() in case the window is closed before the timer fires.
     def _load_when_ready() -> None:
         if root.winfo_exists():
             app.load_current()
+            _apply_startup_modes()
 
     def _open_when_ready() -> None:
         if root.winfo_exists():

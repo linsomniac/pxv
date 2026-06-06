@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lossless/quality, and TIFF compression (None/LZW/Deflate) — plus a "keep metadata"
   toggle synced with the info panel. Chosen values are remembered for the session.
   JPEG quality is no longer hardcoded to 95.
+- Slideshow mode: press `s` to auto-advance through the file list (default 4s), and
+  `+` / `-` to change the interval by 1s while it runs. Start one at launch with
+  `--slideshow` (or `--slideshow=SECS`).
+- Fullscreen presentation mode: press `f` or `F11` (or launch with `--fullscreen`)
+  to show the image centered on black with no window chrome. `Escape` leaves
+  slideshow/fullscreen before falling back to clearing the selection.
 
 ## [1.0.3] - 2026-06-05
 
