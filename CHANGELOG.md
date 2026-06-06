@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Save-options dialog: when saving as JPEG, PNG, WebP, or TIFF, a small dialog now
+  lets you choose encoding parameters — JPEG quality, PNG compression level, WebP
+  lossless/quality, and TIFF compression (None/LZW/Deflate) — plus a "keep metadata"
+  toggle synced with the info panel. Chosen values are remembered for the session.
+  JPEG quality is no longer hardcoded to 95.
+
 ## [1.0.3] - 2026-06-05
 
 Adds the image info / EXIF panel and fixes a dialog-close focus lockup.

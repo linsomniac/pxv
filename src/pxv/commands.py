@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from pxv import metadata
+from pxv import metadata, save_options
 
 if TYPE_CHECKING:
     from pxv.app import PxvApp
@@ -134,9 +134,24 @@ def cmd_save_as(app: PxvApp) -> None:
         return
 
     fmt, path = _resolve_save_format(path)
-    save_kwargs: dict[str, object] = {}
-    if fmt == "JPEG":
-        save_kwargs["quality"] = 95
+
+    # For formats with tunable encoders, let the user pick options (and toggle
+    # metadata) before saving. Cancelling the dialog aborts the whole save.
+    if fmt in save_options.FORMATS_WITH_OPTIONS:
+        from pxv.dialogs import save_options_dialog
+
+        keep_supported = fmt in _EXIF_WRITE_FORMATS
+        chosen = save_options_dialog(
+            app.root, fmt, app.save_options, app.image_model.keep_metadata, keep_supported
+        )
+        if chosen is None:
+            return
+        app.save_options, app.image_model.keep_metadata = chosen
+        # Keep the Info dialog's "Keep metadata" checkbox in sync.
+        if app.info_dialog is not None:
+            app.info_dialog.refresh()
+
+    save_kwargs: dict[str, object] = save_options.build_save_kwargs(fmt, app.save_options)
     exif_bytes = _exif_for_save(app.image_model, fmt)
     if exif_bytes is not None:
         save_kwargs["exif"] = exif_bytes

@@ -1,9 +1,15 @@
-"""Resize dialog, Help dialog, and About dialog for pxv."""
+"""Resize dialog, Save-options dialog, and Help dialog for pxv."""
 
 from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+
+from pxv.save_options import (
+    TIFF_COMPRESSION_CHOICES,
+    SaveOptions,
+    clamp_options,
+)
 
 # AIDEV-NOTE: This table is the single source of truth for keyboard shortcuts
 # displayed in the help dialog. Update it whenever a binding is added/changed
@@ -124,6 +130,125 @@ def resize_dialog(parent: tk.Tk, current_size: tuple[int, int]) -> tuple[int, in
     w_entry.select_range(0, tk.END)
     dialog.bind("<Return>", lambda _: on_ok())
     dialog.bind("<Escape>", lambda _: on_cancel())
+
+    # Center on parent
+    dialog.update_idletasks()
+    px = parent.winfo_x() + (parent.winfo_width() - dialog.winfo_width()) // 2
+    py = parent.winfo_y() + (parent.winfo_height() - dialog.winfo_height()) // 2
+    dialog.geometry(f"+{px}+{py}")
+
+    parent.wait_window(dialog)
+    return result
+
+
+def save_options_dialog(
+    parent: tk.Tk,
+    fmt: str,
+    opts: SaveOptions,
+    keep_metadata: bool,
+    keep_supported: bool,
+) -> tuple[SaveOptions, bool] | None:
+    """Modal dialog for per-format encoding options.
+
+    Renders only the controls relevant to `fmt` (plus a "Keep metadata" checkbox
+    when `keep_supported`). Returns the updated (clamped) options and keep flag,
+    or None if the user cancels — which aborts the save.
+    """
+    result: tuple[SaveOptions, bool] | None = None
+
+    dialog = tk.Toplevel(parent)
+    dialog.title(f"{fmt} Save Options")
+    dialog.resizable(False, False)
+    dialog.transient(parent)
+    dialog.grab_set()
+
+    # Seed every var from opts; only the format's relevant widgets are shown, so
+    # the unshown vars carry their existing values straight through on OK.
+    jpeg_quality = tk.IntVar(value=opts.jpeg_quality)
+    png_level = tk.IntVar(value=opts.png_compress_level)
+    webp_lossless = tk.BooleanVar(value=opts.webp_lossless)
+    webp_quality = tk.IntVar(value=opts.webp_quality)
+    tiff_compression = tk.StringVar(value=opts.tiff_compression)
+    keep_var = tk.BooleanVar(value=keep_metadata)
+
+    frame = ttk.Frame(dialog, padding=10)
+    frame.pack(fill=tk.BOTH, expand=True)
+    row = 0
+
+    def _add_spinbox(label: str, var: tk.IntVar, low: int, high: int) -> ttk.Spinbox:
+        nonlocal row
+        ttk.Label(frame, text=label).grid(row=row, column=0, sticky=tk.E, padx=(0, 6), pady=2)
+        spin = ttk.Spinbox(frame, from_=low, to=high, textvariable=var, width=8)
+        spin.grid(row=row, column=1, sticky=tk.W, pady=2)
+        row += 1
+        return spin
+
+    if fmt == "JPEG":
+        _add_spinbox("Quality (1-100):", jpeg_quality, 1, 100)
+    elif fmt == "PNG":
+        _add_spinbox("Compression (0-9):", png_level, 0, 9)
+    elif fmt == "WEBP":
+        quality_spin = _add_spinbox("Quality (1-100):", webp_quality, 1, 100)
+
+        def _sync_quality_state(*_args: object) -> None:
+            quality_spin.configure(state=tk.DISABLED if webp_lossless.get() else tk.NORMAL)
+
+        ttk.Checkbutton(
+            frame, text="Lossless", variable=webp_lossless, command=_sync_quality_state
+        ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=2)
+        row += 1
+        _sync_quality_state()
+    elif fmt == "TIFF":
+        ttk.Label(frame, text="Compression:").grid(
+            row=row, column=0, sticky=tk.E, padx=(0, 6), pady=2
+        )
+        ttk.Combobox(
+            frame,
+            textvariable=tiff_compression,
+            values=TIFF_COMPRESSION_CHOICES,
+            state="readonly",
+            width=8,
+        ).grid(row=row, column=1, sticky=tk.W, pady=2)
+        row += 1
+
+    if keep_supported:
+        ttk.Checkbutton(frame, text="Keep metadata on save", variable=keep_var).grid(
+            row=row, column=0, columnspan=2, sticky=tk.W, pady=(6, 2)
+        )
+        row += 1
+
+    def on_ok() -> None:
+        nonlocal result
+
+        def _read(var: tk.IntVar, fallback: int) -> int:
+            try:
+                return var.get()
+            except (tk.TclError, ValueError):
+                return fallback
+
+        new_opts = clamp_options(
+            SaveOptions(
+                jpeg_quality=_read(jpeg_quality, opts.jpeg_quality),
+                png_compress_level=_read(png_level, opts.png_compress_level),
+                webp_lossless=webp_lossless.get(),
+                webp_quality=_read(webp_quality, opts.webp_quality),
+                tiff_compression=tiff_compression.get(),
+            )
+        )
+        result = (new_opts, keep_var.get())
+        dialog.destroy()
+
+    def on_cancel() -> None:
+        dialog.destroy()
+
+    btn_frame = ttk.Frame(frame)
+    btn_frame.grid(row=row, column=0, columnspan=2, pady=(10, 0))
+    ttk.Button(btn_frame, text="Save", command=on_ok, width=8).pack(side=tk.LEFT, padx=4)
+    ttk.Button(btn_frame, text="Cancel", command=on_cancel, width=8).pack(side=tk.LEFT, padx=4)
+
+    dialog.bind("<Return>", lambda _: on_ok())
+    dialog.bind("<Escape>", lambda _: on_cancel())
+    dialog.protocol("WM_DELETE_WINDOW", on_cancel)
 
     # Center on parent
     dialog.update_idletasks()

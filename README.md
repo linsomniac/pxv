@@ -81,6 +81,7 @@ The enhancement dialog (`e`) provides real-time adjustment of:
 - XV-style window sizing: window grows/shrinks to fit the displayed image, capped at the current monitor's bounds
 - Multi-monitor aware: detects per-monitor geometry via xrandr so windows don't span displays
 - EXIF-aware orientation
+- Save-options dialog for JPEG/PNG/WebP/TIFF (quality, compression, lossless, keep-metadata)
 - Rubber-band selection for cropping
 - Wrap-around file navigation
 - Supports PNG, JPEG, BMP, TIFF, GIF, WebP, PPM, PGM, PBM, ICO

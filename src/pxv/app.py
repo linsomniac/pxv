@@ -18,6 +18,7 @@ from pxv.context_menu import ContextMenu
 from pxv.enhancements import EnhancementParams
 from pxv.file_list import FileList, expand_paths
 from pxv.image_model import ImageModel
+from pxv.save_options import SaveOptions
 
 if TYPE_CHECKING:
     from pxv.enhancement_dialog import EnhancementDialog
@@ -80,6 +81,9 @@ class PxvApp:
         self.file_list = file_list
         self.image_model = ImageModel()
         self.enhancement_params = EnhancementParams()
+        # AIDEV-NOTE: Session-remembered Save As encoding options (JPEG quality,
+        # PNG level, WebP lossless/quality, TIFF compression). Reset on restart.
+        self.save_options = SaveOptions()
 
         # Will be set if the enhancement dialog is open
         self.enhancement_dialog: EnhancementDialog | None = None
