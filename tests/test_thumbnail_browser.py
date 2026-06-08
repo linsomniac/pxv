@@ -142,6 +142,7 @@ def test_broken_file_does_not_stall_loader(tmp_path: Path) -> None:
         _drain_loader(app.browser)
         # Both tiles resolve to a terminal state; the bad one is marked, not hung.
         assert all(t.loaded for t in app.browser._tiles)
+        assert app.browser._tiles[1].image_label.cget("text") == "broken"
     finally:
         root.destroy()
 
@@ -186,5 +187,34 @@ def test_empty_file_list_shows_no_images_state(tmp_path: Path) -> None:
         root.update()
         assert app.browser._tiles == []
         assert app.browser._empty_label is not None
+    finally:
+        root.destroy()
+
+
+def test_failed_load_rolls_back_grid_highlight(tmp_path: Path, monkeypatch) -> None:
+    from pxv import commands
+    from pxv.app import PxvApp
+    from pxv.file_list import FileList
+
+    # load_current() shows a modal error dialog on failure; silence it.
+    monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **k: None)
+
+    good = tmp_path / "g0.png"
+    Image.new("RGB", (30, 30), (0, 100, 0)).save(good)
+    bad = tmp_path / "bad.png"
+    bad.write_text("not an image")
+    root = tk.Tk()
+    app = PxvApp(root, FileList([good.resolve(), bad.resolve()]))
+    root.update_idletasks()
+    try:
+        app.load_current()  # display the good image at index 0
+        commands.cmd_toggle_browser(app)
+        root.update()
+        assert app.browser._selected == 0
+
+        commands.cmd_show_index(app, 1)  # bad image -> load fails -> rollback
+        root.update()
+        assert app.file_list.index == 0  # index rolled back
+        assert app.browser._selected == 0  # highlight snapped back to the shown image
     finally:
         root.destroy()

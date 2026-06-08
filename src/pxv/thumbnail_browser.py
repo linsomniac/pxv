@@ -152,6 +152,8 @@ class BrowserWindow(tk.Toplevel):
         the re-decode cheap.
         """
         self._cancel_loader()
+        # A pending _configure_after_id reflow is intentionally left: it re-guards on
+        # winfo_exists()/_tiles and recomputes from scratch, so a late fire is harmless.
         for tile in self._tiles:
             tile.frame.destroy()
         self._tiles.clear()
@@ -279,6 +281,7 @@ class BrowserWindow(tk.Toplevel):
         tile = self._tiles[index]
         fy = tile.frame.winfo_y()
         fh = tile.frame.winfo_height()
+        # canvasy is untyped in typeshed; float() pins the type for the comparisons below.
         top = float(self._canvas.canvasy(0))  # type: ignore[no-untyped-call]
         view_h = self._canvas.winfo_height()
         if fy < top:
