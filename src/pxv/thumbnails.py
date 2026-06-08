@@ -68,3 +68,16 @@ def load_thumbnail(path: Path, size: int, bg: tuple[int, int, int] = CELL_BG) ->
     img: Image.Image = ImageOps.exif_transpose(raw)
     img = _flatten(img, bg)
     return pad_to_square(fit_thumbnail(img, size), size, bg)
+
+
+def columns_for_width(width: int, cell: int, gap: int, pad: int) -> int:
+    """Number of cell-wide columns that fit in a viewport `width` px wide.
+
+    `pad` is the grid's left+right inset; `gap` separates adjacent columns. Solves
+    n*cell + (n-1)*gap <= usable for the largest n, and never returns less than 1 so
+    a too-narrow window still shows a single column.
+    """
+    usable = width - 2 * pad
+    if usable < cell:
+        return 1
+    return max(1, (usable + gap) // (cell + gap))

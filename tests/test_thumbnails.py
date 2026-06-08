@@ -70,3 +70,18 @@ def test_load_thumbnail_raises_on_non_image(tmp_path: Path) -> None:
     p.write_text("this is not an image")
     with pytest.raises(Exception):
         load_thumbnail(p, 128, CELL_BG)
+
+
+from pxv.thumbnails import columns_for_width
+
+
+def test_columns_for_width_basic_counts() -> None:
+    # cell=134, gap=10, pad=10 (the browser's geometry constants)
+    assert columns_for_width(600, 134, 10, 10) == 4
+    assert columns_for_width(1000, 134, 10, 10) == 6
+
+
+def test_columns_for_width_never_below_one() -> None:
+    assert columns_for_width(140, 134, 10, 10) == 1  # usable < one cell
+    assert columns_for_width(0, 134, 10, 10) == 1
+    assert columns_for_width(200, 134, 10, 10) == 1  # exactly one cell fits
