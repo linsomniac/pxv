@@ -383,6 +383,34 @@ def cmd_prev_image(app: PxvApp) -> None:
         app.file_list.index = prev_index
 
 
+def cmd_toggle_browser(app: PxvApp) -> None:
+    """Open the Visual Schnauzer thumbnail browser, or close it if already open."""
+    if app.browser is not None:
+        app.browser._on_close()
+        return
+    from pxv.thumbnail_browser import BrowserWindow
+
+    app.browser = BrowserWindow(app)
+
+
+def cmd_show_index(app: PxvApp, index: int) -> None:
+    """Jump the viewer to file-list position `index` (no-op if out of range).
+
+    AIDEV-NOTE: On a failed full-res load, roll the cursor back like cmd_next_image
+    and re-sync the grid highlight to the still-displayed image. On success,
+    load_current() itself re-syncs the highlight (the grid<-viewer direction), so
+    this only re-syncs on the rollback path.
+    """
+    if not (0 <= index < app.file_list.count()):
+        return
+    prev_index = app.file_list.index
+    app.file_list.index = index
+    if not app.load_current():
+        app.file_list.index = prev_index
+        if app.browser is not None:
+            app.browser.sync_selection(app.file_list.index)
+
+
 def cmd_info(app: PxvApp) -> None:
     """Open or raise the image info / EXIF dialog."""
     from pxv.info_dialog import InfoDialog
