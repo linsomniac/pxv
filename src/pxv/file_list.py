@@ -84,6 +84,14 @@ class FileList:
         self._paths.append(resolved)
         self._index = len(self._paths) - 1
 
+    def paths(self) -> list[Path]:
+        """Return a snapshot copy of the ordered file paths.
+
+        AIDEV-NOTE: A copy so callers (e.g. the thumbnail browser building tiles)
+        can iterate without risk of mutating the live list.
+        """
+        return list(self._paths)
+
 
 def expand_paths(raw_paths: list[str]) -> list[Path]:
     """Expand CLI arguments to a flat list of image file paths.

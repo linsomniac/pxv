@@ -75,3 +75,16 @@ def test_expand_paths_reports_missing(capsys, tmp_path: Path) -> None:
     result = expand_paths([str(missing)])
     assert result == []
     assert "skipping nonexistent" in capsys.readouterr().err
+
+
+def test_paths_returns_independent_snapshot() -> None:
+    from pathlib import Path
+
+    from pxv.file_list import FileList
+
+    fl = FileList([Path("a.png"), Path("b.png")])
+    assert fl.paths() == [Path("a.png"), Path("b.png")]
+
+    # Mutating the returned list must not affect the FileList.
+    fl.paths().append(Path("c.png"))
+    assert fl.count() == 2
