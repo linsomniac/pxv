@@ -97,6 +97,9 @@ def cmd_open(app: PxvApp) -> None:
     p = Path(path)
     app.file_list.add(p)
     app.load_current()
+    # AIDEV-NOTE: A newly opened file must appear in the Visual Schnauzer if it's open.
+    if app.browser is not None:
+        app.browser.rebuild()
 
 
 def _exif_for_save(model: "ImageModel", fmt: str) -> bytes | None:

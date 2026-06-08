@@ -191,6 +191,25 @@ def test_empty_file_list_shows_no_images_state(tmp_path: Path) -> None:
         root.destroy()
 
 
+def test_rebuild_picks_up_a_newly_added_file(tmp_path: Path) -> None:
+    from pxv import commands
+
+    app, root = _make_app(tmp_path, 2)
+    try:
+        commands.cmd_toggle_browser(app)
+        root.update()
+        assert len(app.browser._tiles) == 2
+
+        new_path = tmp_path / "added.png"
+        Image.new("RGB", (20, 20), (0, 0, 200)).save(new_path)
+        app.file_list.add(new_path.resolve())
+        app.browser.rebuild()
+        root.update()
+        assert len(app.browser._tiles) == 3
+    finally:
+        root.destroy()
+
+
 def test_failed_load_rolls_back_grid_highlight(tmp_path: Path, monkeypatch) -> None:
     from pxv import commands
     from pxv.app import PxvApp
