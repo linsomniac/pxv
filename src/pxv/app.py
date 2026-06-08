@@ -22,10 +22,12 @@ from pxv.history import History, Snapshot
 from pxv.image_model import ImageModel
 from pxv.save_options import SaveOptions
 from pxv.slideshow import DEFAULT_SLIDESHOW_SECONDS, adjusted_interval_ms, interval_to_ms
+from pxv.thumbnails import ThumbnailCache
 
 if TYPE_CHECKING:
     from pxv.enhancement_dialog import EnhancementDialog
     from pxv.info_dialog import InfoDialog
+    from pxv.thumbnail_browser import BrowserWindow
 
 
 # AIDEV-NOTE: Tkinter's winfo_screenwidth/height returns the total virtual desktop
@@ -96,6 +98,12 @@ class PxvApp:
         self.enhancement_dialog: EnhancementDialog | None = None
         # Will be set if the info / EXIF dialog is open
         self.info_dialog: InfoDialog | None = None
+        # AIDEV-NOTE: The Visual Schnauzer thumbnail browser (a non-modal Toplevel).
+        # Held here so commands/load_current can drive it; None when closed.
+        self.browser: BrowserWindow | None = None
+        # AIDEV-NOTE: Decoded PIL thumbnails keyed by resolved path. Lives on the app
+        # (not the window) so it survives browser open/close and navigation.
+        self.thumbnail_cache = ThumbnailCache()
         # AIDEV-NOTE: Toggles transparent-area compositing between white and black.
         # Only affects display; saving always uses the true alpha channel.
         self.dark_background: bool = False
@@ -176,6 +184,7 @@ class PxvApp:
         self.root.bind("<Escape>", lambda _: commands.cmd_escape(self))
         self.root.bind("<question>", lambda _: commands.cmd_help(self))
         self.root.bind("<Key-i>", lambda _: commands.cmd_info(self))
+        self.root.bind("<Key-b>", lambda _: commands.cmd_toggle_browser(self))
         self.root.bind("<Key-f>", lambda _: commands.cmd_toggle_fullscreen(self))
         self.root.bind("<F11>", lambda _: commands.cmd_toggle_fullscreen(self))
         self.root.bind("<Key-s>", lambda _: commands.cmd_toggle_slideshow(self))
@@ -261,6 +270,11 @@ class PxvApp:
         self._apply_fit()
 
         self.refresh_display()
+        # AIDEV-NOTE: Keep the open browser's highlight on the displayed image. This
+        # covers every load path (Space/arrows, jumps, Open). sync_selection never
+        # loads, so there is no recursion with _activate -> cmd_show_index.
+        if self.browser is not None:
+            self.browser.sync_selection(self.file_list.index)
         return True
 
     def _apply_fit(self) -> None:
