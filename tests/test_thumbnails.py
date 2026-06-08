@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
-from PIL import Image
+from pathlib import Path
 
-from pxv.thumbnails import CELL_BG, fit_thumbnail, pad_to_square
+import pytest
+from PIL import Image, UnidentifiedImageError
+
+from pxv.thumbnails import (
+    CELL_BG,
+    ThumbnailCache,
+    columns_for_width,
+    fit_thumbnail,
+    load_thumbnail,
+    pad_to_square,
+)
 
 
 def test_fit_thumbnail_landscape_keeps_aspect_within_bounds() -> None:
@@ -30,13 +40,6 @@ def test_pad_to_square_centers_on_background_cell() -> None:
     assert out.getpixel((64, 64)) == (255, 0, 0)  # center is the image
 
 
-from pathlib import Path
-
-import pytest
-
-from pxv.thumbnails import load_thumbnail
-
-
 def test_load_thumbnail_flattens_transparency_onto_cell_bg(tmp_path: Path) -> None:
     p = tmp_path / "clear.png"
     Image.new("RGBA", (64, 64), (255, 0, 0, 0)).save(p)  # fully transparent
@@ -44,6 +47,14 @@ def test_load_thumbnail_flattens_transparency_onto_cell_bg(tmp_path: Path) -> No
     assert out.size == (128, 128)
     assert out.mode == "RGB"
     assert out.getpixel((64, 64)) == CELL_BG  # transparent pixels -> cell bg
+
+
+def test_load_thumbnail_flattens_la_mode(tmp_path: Path) -> None:
+    p = tmp_path / "gray_alpha.png"
+    Image.new("LA", (64, 64), (200, 0)).save(p)  # fully transparent gray
+    out = load_thumbnail(p, 128, CELL_BG)
+    assert out.mode == "RGB"
+    assert out.getpixel((64, 64)) == CELL_BG
 
 
 def test_load_thumbnail_honors_exif_orientation(tmp_path: Path) -> None:
@@ -68,11 +79,8 @@ def test_load_thumbnail_honors_exif_orientation(tmp_path: Path) -> None:
 def test_load_thumbnail_raises_on_non_image(tmp_path: Path) -> None:
     p = tmp_path / "notes.txt"
     p.write_text("this is not an image")
-    with pytest.raises(Exception):
+    with pytest.raises((OSError, UnidentifiedImageError)):
         load_thumbnail(p, 128, CELL_BG)
-
-
-from pxv.thumbnails import columns_for_width
 
 
 def test_columns_for_width_basic_counts() -> None:
@@ -87,7 +95,8 @@ def test_columns_for_width_never_below_one() -> None:
     assert columns_for_width(200, 134, 10, 10) == 1  # exactly one cell fits
 
 
-from pxv.thumbnails import ThumbnailCache
+def test_columns_for_width_zero_cell() -> None:
+    assert columns_for_width(500, 0, 0, 0) == 1
 
 
 def test_thumbnail_cache_put_get_contains_clear(tmp_path: Path) -> None:

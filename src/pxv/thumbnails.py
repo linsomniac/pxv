@@ -29,9 +29,11 @@ def fit_thumbnail(img: Image.Image, size: int) -> Image.Image:
 
 
 def pad_to_square(img: Image.Image, size: int, bg: tuple[int, int, int] = CELL_BG) -> Image.Image:
-    """Center an already-fit RGB image on a size x size cell filled with bg.
+    """Center img on a size x size cell filled with bg.
 
-    Every tile becomes uniform size x size regardless of the source aspect ratio.
+    img should already fit within size x size (see fit_thumbnail); an oversized
+    image is center-clipped rather than scaled. Every tile becomes uniform
+    size x size regardless of the source aspect ratio.
     """
     cell = Image.new("RGB", (size, size), bg)
     x = (size - img.width) // 2
@@ -78,7 +80,7 @@ def columns_for_width(width: int, cell: int, gap: int, pad: int) -> int:
     a too-narrow window still shows a single column.
     """
     usable = width - 2 * pad
-    if usable < cell:
+    if usable < cell or cell + gap <= 0:
         return 1
     return max(1, (usable + gap) // (cell + gap))
 
