@@ -81,3 +81,28 @@ def columns_for_width(width: int, cell: int, gap: int, pad: int) -> int:
     if usable < cell:
         return 1
     return max(1, (usable + gap) // (cell + gap))
+
+
+class ThumbnailCache:
+    """Maps a resolved Path to its decoded PIL thumbnail. Survives browser toggles.
+
+    AIDEV-NOTE: Stores PIL images, NOT Tk PhotoImage — PhotoImage is main-thread and
+    bound to a live interpreter, while these survive window close/reopen. The browser
+    rewraps cache hits in PhotoImage with no disk I/O. Keyed by resolved path so the
+    same file reached via different relative paths hits the same entry.
+    """
+
+    def __init__(self) -> None:
+        self._items: dict[Path, Image.Image] = {}
+
+    def __contains__(self, path: Path) -> bool:
+        return path.resolve() in self._items
+
+    def get(self, path: Path) -> Image.Image | None:
+        return self._items.get(path.resolve())
+
+    def put(self, path: Path, img: Image.Image) -> None:
+        self._items[path.resolve()] = img
+
+    def clear(self) -> None:
+        self._items.clear()

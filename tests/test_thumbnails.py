@@ -85,3 +85,23 @@ def test_columns_for_width_never_below_one() -> None:
     assert columns_for_width(140, 134, 10, 10) == 1  # usable < one cell
     assert columns_for_width(0, 134, 10, 10) == 1
     assert columns_for_width(200, 134, 10, 10) == 1  # exactly one cell fits
+
+
+from pxv.thumbnails import ThumbnailCache
+
+
+def test_thumbnail_cache_put_get_contains_clear(tmp_path: Path) -> None:
+    cache = ThumbnailCache()
+    p = tmp_path / "a.png"
+    img = Image.new("RGB", (4, 4), (1, 2, 3))
+
+    assert p not in cache
+    assert cache.get(p) is None
+
+    cache.put(p, img)
+    assert p in cache
+    assert cache.get(p) is img
+
+    cache.clear()
+    assert p not in cache
+    assert cache.get(p) is None
