@@ -53,6 +53,7 @@ applications menu and image "Open with" lists.
 | `M` | Zoom to fill display |
 | `Space` / `Right` | Next image |
 | `Backspace` / `Left` | Previous image |
+| `b` | Browse thumbnails (Visual Schnauzer) |
 | `c` | Crop to selection |
 | `A` | Autocrop background borders |
 | `u` | Uncrop (undo last crop) |

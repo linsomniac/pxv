@@ -38,6 +38,7 @@ KEYBINDINGS: list[tuple[str, str]] = [
     ("Ctrl+S", "Save As..."),
     ("Space / Right", "Next image"),
     ("Backspace / Left", "Previous image"),
+    ("b", "Browse thumbnails (Visual Schnauzer)"),
     ("Escape", "Exit slideshow/fullscreen, or clear selection"),
     ("Right-click", "Context menu"),
 ]

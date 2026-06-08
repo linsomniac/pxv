@@ -51,6 +51,9 @@ class ContextMenu:
         self.menu.add_separator()
 
         self.menu.add_command(label="Info...", command=lambda: commands.cmd_info(app))
+        self.menu.add_command(
+            label="Browse thumbnails...", command=lambda: commands.cmd_toggle_browser(app)
+        )
         self.menu.add_separator()
         self.menu.add_command(
             label="Enhancements...", command=lambda: commands.cmd_enhancement_dialog(app)

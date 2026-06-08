@@ -41,3 +41,10 @@ def test_cmd_show_index_rolls_back_on_failed_load() -> None:
     commands.cmd_show_index(app, 2)
     assert app.file_list.index == 0  # rolled back to the still-displayed image
     assert loaded == [2]
+
+
+def test_keybindings_table_lists_browse() -> None:
+    from pxv.dialogs import KEYBINDINGS
+
+    keys = [k for k, _desc in KEYBINDINGS]
+    assert "b" in keys
