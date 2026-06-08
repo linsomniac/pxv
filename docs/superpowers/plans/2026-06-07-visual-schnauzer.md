@@ -196,7 +196,10 @@ def test_load_thumbnail_flattens_transparency_onto_cell_bg(tmp_path: Path) -> No
 
 def test_load_thumbnail_honors_exif_orientation(tmp_path: Path) -> None:
     # 100x50 landscape tagged orientation=6 becomes 50x100 portrait after transpose.
-    # A portrait thumbnail has content at top-center (64, 5); a landscape would not.
+    # fit_thumbnail never upscales, so the 50x100 image is padded with a y-offset of
+    # (128-100)//2 = 14: content fills y in [14, 114). Pixel (64, 20) is red ONLY when
+    # orientation was applied -- an un-oriented 100x50 landscape pads with y-offset 39,
+    # leaving (64, 20) in the top letterbox.
     img = Image.new("RGB", (100, 50), (255, 0, 0))
     exif = img.getexif()
     exif[0x0112] = 6  # Orientation: rotate 90 CW
@@ -205,7 +208,7 @@ def test_load_thumbnail_honors_exif_orientation(tmp_path: Path) -> None:
 
     out = load_thumbnail(p, 128, CELL_BG)
     assert out.size == (128, 128)
-    r, g, b = out.getpixel((64, 5))
+    r, g, b = out.getpixel((64, 20))
     assert r > 200 and g < 60 and b < 60  # content (red), proving portrait orientation
     assert out.getpixel((2, 64)) == CELL_BG  # left letterbox bar
 
