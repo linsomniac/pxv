@@ -38,3 +38,33 @@ def pad_to_square(img: Image.Image, size: int, bg: tuple[int, int, int] = CELL_B
     y = (size - img.height) // 2
     cell.paste(img, (x, y))
     return cell
+
+
+def _flatten(img: Image.Image, bg: tuple[int, int, int]) -> Image.Image:
+    """Composite any transparent image onto bg; convert opaque non-RGB to RGB.
+
+    AIDEV-NOTE: Mirrors ImageModel._to_rgb_working but flattens onto the cell color
+    (not white) so a tile matches the viewer's transparency rendering on the grid.
+    """
+    if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
+        rgba = img if img.mode == "RGBA" else img.convert("RGBA")
+        base = Image.new("RGB", img.size, bg)
+        base.paste(rgba, mask=rgba.split()[3])
+        return base
+    if img.mode != "RGB":
+        return img.convert("RGB")
+    return img
+
+
+def load_thumbnail(path: Path, size: int, bg: tuple[int, int, int] = CELL_BG) -> Image.Image:
+    """Decode path into a size x size RGB thumbnail tile.
+
+    Applies EXIF orientation and flattens transparency onto bg so the tile matches
+    the viewer. Raises (OSError / PIL.UnidentifiedImageError) on an unreadable or
+    non-image file — the caller maps that to a 'broken' tile.
+    """
+    raw = Image.open(path)
+    raw.load()  # force full decode so the file handle is released
+    img: Image.Image = ImageOps.exif_transpose(raw)
+    img = _flatten(img, bg)
+    return pad_to_square(fit_thumbnail(img, size), size, bg)
