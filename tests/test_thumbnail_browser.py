@@ -237,3 +237,20 @@ def test_failed_load_rolls_back_grid_highlight(tmp_path: Path, monkeypatch) -> N
         assert app.browser._selected == 0  # highlight snapped back to the shown image
     finally:
         root.destroy()
+
+
+def test_quit_with_browser_open_closes_it(tmp_path: Path) -> None:
+    from pxv import commands
+
+    app, root = _make_app(tmp_path, 2)
+    try:
+        commands.cmd_toggle_browser(app)
+        root.update()
+        assert app.browser is not None
+        commands.cmd_quit(app)  # must close the browser (cancel its timers) before destroy
+        assert app.browser is None
+    finally:
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass

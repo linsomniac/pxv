@@ -493,4 +493,9 @@ def cmd_about(app: PxvApp) -> None:
 
 
 def cmd_quit(app: PxvApp) -> None:
+    # AIDEV-NOTE: Close the thumbnail browser first if open, so its pending loader/
+    # reflow after() timers are cancelled before the interpreter is torn down
+    # (otherwise a mid-load quit emits "invalid command name" noise on stderr).
+    if app.browser is not None:
+        app.browser._on_close()
     app.root.destroy()
