@@ -40,6 +40,35 @@ It targets current distributions (Debian 13 / Ubuntu 24.04 or newer, which ship
 Pillow ≥ 10). After installing, `pxv` is on your `PATH` and appears in the
 applications menu and image "Open with" lists.
 
+### NixOS / Nix (flake)
+
+Run it without installing:
+
+```sh
+nix run github:linsomniac/pxv -- photo.jpg
+```
+
+Install into your profile:
+
+```sh
+nix profile install github:linsomniac/pxv
+```
+
+Add to a NixOS configuration via the overlay (this also installs the `.desktop`
+entry and icon, so pxv appears in launchers and "Open with" menus):
+
+```nix
+{
+  inputs.pxv.url = "github:linsomniac/pxv";
+
+  # in your configuration.nix / module:
+  nixpkgs.overlays = [ inputs.pxv.overlays.default ];
+  environment.systemPackages = [ pkgs.pxv ];
+}
+```
+
+Without flakes, `nix-build` produces the package from a checkout (uses `default.nix`).
+
 ## Keyboard Shortcuts
 
 | Key | Action |
