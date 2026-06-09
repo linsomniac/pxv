@@ -254,3 +254,82 @@ def test_quit_with_browser_open_closes_it(tmp_path: Path) -> None:
             root.destroy()
         except tk.TclError:
             pass
+
+
+def test_browser_binds_wheel_events(tmp_path: Path) -> None:
+    # AIDEV-NOTE: The Toplevel is in every descendant's bindtags, so a single binding here
+    # catches the wheel over the tiles too. <MouseWheel> is a mouse wheel (and the trackpad
+    # on Tk 8.6); <TouchpadScroll> is the trackpad on Tk 8.7+/9.0 (bound only where it
+    # exists). Pin both.
+    from pxv import commands
+
+    app, root = _make_app(tmp_path, 3)
+    try:
+        commands.cmd_toggle_browser(app)
+        root.update()
+        assert app.browser.bind("<MouseWheel>")  # non-empty bound script
+        assert app.browser.bind("<Button-4>")
+        if root.call("info", "commands", "tk::PreciseScrollDeltas"):
+            assert app.browser.bind("<TouchpadScroll>")  # bound on Tk 8.7+
+    finally:
+        root.destroy()
+
+
+def test_wheel_handler_scrolls_the_canvas(tmp_path: Path) -> None:
+    # The wheel handler bound on the Toplevel must move the canvas view. With many images
+    # the grid is taller than the viewport, so a downward notch advances the top off 0.
+    # (We invoke _on_wheel directly: event_generate does not populate num/delta reliably
+    # in a headless Tk, but _on_wheel is exactly the callback the Toplevel is bound to.)
+    from pxv import commands
+
+    app, root = _make_app(tmp_path, 40)
+    try:
+        commands.cmd_toggle_browser(app)
+        root.update()
+        root.update_idletasks()
+        canvas = app.browser._canvas
+        assert canvas.yview()[0] == 0.0
+
+        down = tk.Event()
+        down.num = 5  # X11 wheel-down
+        down.delta = 0
+        app.browser._on_wheel(down)
+        root.update_idletasks()
+        assert canvas.yview()[0] > 0.0  # scrolled down
+
+        up = tk.Event()
+        up.num = 4  # X11 wheel-up
+        up.delta = 0
+        app.browser._on_wheel(up)
+        root.update_idletasks()
+        assert canvas.yview()[0] == 0.0  # scrolled back to the top
+    finally:
+        root.destroy()
+
+
+def test_touchpad_scroll_moves_the_canvas(tmp_path: Path) -> None:
+    # Tk 8.7+/9.0 deliver trackpad gestures as <TouchpadScroll>; _on_touchpad_scroll
+    # decodes the packed delta via tk::PreciseScrollDeltas and scrolls. Skipped on older
+    # Tk that lacks that helper (there the <MouseWheel> path covers the trackpad).
+    from pxv import commands
+
+    app, root = _make_app(tmp_path, 60)
+    try:
+        if not root.call("info", "commands", "tk::PreciseScrollDeltas"):
+            pytest.skip("Tk < 8.7 has no <TouchpadScroll>")
+        commands.cmd_toggle_browser(app)
+        root.update()
+        root.update_idletasks()
+        canvas = app.browser._canvas
+        top = canvas.yview()[0]
+
+        # delta low word 0xFFFD -> deltaY = -3 -> scroll down. serial % 5 == 0 to pass the
+        # throttle. (event_generate won't populate serial/delta headlessly, so call direct.)
+        down = tk.Event()
+        down.serial = 5
+        down.delta = 65533
+        app.browser._on_touchpad_scroll(down)
+        root.update_idletasks()
+        assert canvas.yview()[0] > top  # scrolled down
+    finally:
+        root.destroy()

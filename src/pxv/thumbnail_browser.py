@@ -139,9 +139,21 @@ class BrowserWindow(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._on_close())
         self.bind("<Key-b>", lambda _e: self._on_close())
         self.bind("<Key-q>", lambda _e: self._on_close())
+        # Mouse-wheel / trackpad scrolling. Tk delivers <MouseWheel> to the widget under
+        # the pointer but runs it up that widget's bindtags, which include this Toplevel
+        # — so one binding here catches the wheel over the tiles, the canvas, and the
+        # empty margins alike (verified on macOS/aqua Tk 8.6 with a binding probe).
+        # <Button-4>/<Button-5> are the X11 equivalents.
         self.bind("<MouseWheel>", self._on_wheel)
         self.bind("<Button-4>", self._on_wheel)
         self.bind("<Button-5>", self._on_wheel)
+        # AIDEV-NOTE: Tk 8.7+/9.0 deliver TRACKPAD gestures as <TouchpadScroll>, not
+        # <MouseWheel> — so on the Tk 9 that uv-managed Pythons bundle, the trackpad is
+        # silent without this. Older Tk has no such event; guard the bind.
+        try:
+            self.bind("<TouchpadScroll>", self._on_touchpad_scroll)
+        except tk.TclError:
+            pass
 
     # --- (re)building the grid -------------------------------------------
 
@@ -345,6 +357,21 @@ class BrowserWindow(tk.Toplevel):
         else:
             return None
         self._canvas.yview_scroll(delta, "units")
+        return "break"
+
+    def _on_touchpad_scroll(self, event: tk.Event) -> str:
+        """Scroll for Tk 8.7+/9.0 trackpad <TouchpadScroll> events.
+
+        Their packed delta is decoded by tk::PreciseScrollDeltas into (dx, dy) line
+        counts. These fire ~60x/second, so act on every 5th event (matching Tk's own
+        Listbox/Treeview bindings) to avoid flinging the grid.
+        """
+        if event.serial % 5 != 0:
+            return "break"
+        _dx, dy = self.tk.call("tk::PreciseScrollDeltas", event.delta)
+        dy = int(dy)
+        if dy:
+            self._canvas.yview_scroll(-dy, "units")
         return "break"
 
     def _on_close(self) -> None:
