@@ -44,7 +44,7 @@ def _make_app() -> tuple[types.SimpleNamespace, tk.Tk]:
         info_dialog=None,
         enhancement_dialog=None,
         enhancement_params=EnhancementParams(),
-        image_model=types.SimpleNamespace(keep_metadata=False, metadata=None),
+        image_model=types.SimpleNamespace(keep_metadata=False, metadata=None, working_image=None),
     )
     app.restore_main_focus = types.MethodType(PxvApp.restore_main_focus, app)
     return app, root

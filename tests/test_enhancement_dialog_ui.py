@@ -80,7 +80,11 @@ def _make_app() -> tuple[types.SimpleNamespace, "tk.Tk"]:
         info_dialog=None,
         enhancement_dialog=None,
         enhancement_params=EnhancementParams(),
-        image_model=types.SimpleNamespace(keep_metadata=False, metadata=None),
+        image_model=types.SimpleNamespace(
+            keep_metadata=False,
+            metadata=None,
+            working_image=Image.new("RGB", (8, 8), (120, 90, 200)),
+        ),
         refresh_calls=[],
     )
     app.refresh_display = lambda: app.refresh_calls.append(True)
@@ -95,7 +99,7 @@ def test_dialog_has_histogram_panel_and_sliders_tab() -> None:
     try:
         dlg = EnhancementDialog(app)
         tabs = [dlg._notebook.tab(tab_id, "text") for tab_id in dlg._notebook.tabs()]
-        assert tabs == ["Sliders"]
+        assert "Sliders" in tabs
         # Sliders still build and sync inside the tab.
         app.enhancement_params.brightness = 1.5
         dlg.sync_sliders_from_params()
@@ -249,5 +253,61 @@ def test_levels_tab_output_markers_cannot_cross_by_drag() -> None:
         tab._on_out_drag(types.SimpleNamespace(x=240))
         tab._on_release(types.SimpleNamespace())
         assert store["master"].out_black <= store["master"].out_white
+    finally:
+        root.destroy()
+
+
+def test_dialog_has_levels_tab_wired_to_params() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+    from pxv.tone import LevelsChannel
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        tabs = [dlg._notebook.tab(tab_id, "text") for tab_id in dlg._notebook.tabs()]
+        assert tabs == ["Sliders", "Levels"]
+        # Widget edits land in the app params...
+        dlg.levels_tab._put(in_black=12)
+        assert app.enhancement_params.levels_master.in_black == 12
+        # ...and external param changes flow back on sync (undo path).
+        app.enhancement_params.levels_master = LevelsChannel(in_black=33)
+        dlg.sync_sliders_from_params()
+        assert dlg.levels_tab._spins["in_black"].get() == "33"
+        dlg._on_close()
+    finally:
+        root.destroy()
+
+
+def test_dialog_levels_edit_schedules_debounced_refresh() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        dlg.levels_tab._put(in_black=20)
+        assert app.refresh_calls == []  # not synchronous — debounced
+        assert dlg._refresh_after_id is not None  # 30ms timer armed
+        dlg._do_refresh()  # fire deterministically (avoids Xvfb timing flake)
+        assert app.refresh_calls == [True]
+        dlg._on_close()
+    finally:
+        root.destroy()
+
+
+def test_dialog_input_histogram_cache_keyed_on_working_image() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        first = dlg._input_histograms()
+        assert first is not None
+        assert dlg._input_histograms() is first  # cached: same object back
+        app.image_model.working_image = Image.new("RGB", (8, 8), (1, 2, 3))
+        second = dlg._input_histograms()
+        assert second is not None and second is not first  # cache invalidated
+        app.image_model.working_image = None
+        assert dlg._input_histograms() is None
+        dlg._on_close()
     finally:
         root.destroy()

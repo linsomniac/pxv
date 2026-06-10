@@ -8,17 +8,19 @@ feedback loops when programmatically setting slider values (e.g., on Reset).
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from tkinter import ttk
+from typing import TYPE_CHECKING, cast
 
 from pxv.enhancements import COLOR_SLIDER_SPECS, SLIDER_SPECS
-from pxv.histogram_panel import HistogramPanel
+from pxv.histogram_panel import HistogramPanel, compute_histograms
+from pxv.levels_tab import LevelsTab
 
 if TYPE_CHECKING:
     from PIL import Image
 
     from pxv.app import PxvApp
+    from pxv.tone import LevelsChannel
 
 
 class EnhancementDialog(tk.Toplevel):
@@ -37,6 +39,9 @@ class EnhancementDialog(tk.Toplevel):
         # Maps attribute name -> (tk variable, scale widget)
         self._slider_vars: dict[str, tk.DoubleVar | tk.IntVar] = {}
         self._scales: dict[str, tk.Scale] = {}
+
+        # Cache of (working_image object, (lum, rgb)) for the Levels strip.
+        self._input_hist_cache: tuple[object, tuple[list[int], list[int]]] | None = None
 
         self._build_ui()
         self.sync_sliders_from_params()
@@ -59,7 +64,7 @@ class EnhancementDialog(tk.Toplevel):
         self.histogram_panel.pack(fill=tk.X, pady=(0, 6))
 
         # AIDEV-NOTE: Tabbed layout per the 2026-06-10 histogram/levels/curves
-        # design — Sliders today; Levels and Curves tabs arrive in later phases.
+        # design — Sliders+Levels today; Curves arrives in a later phase.
         self._notebook = ttk.Notebook(main_frame)
         self._notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -73,6 +78,16 @@ class EnhancementDialog(tk.Toplevel):
         color_frame = ttk.LabelFrame(sliders_tab, text="Color", padding=6)
         color_frame.pack(fill=tk.X)
         self._add_sliders(color_frame, COLOR_SLIDER_SPECS)
+
+        self.levels_tab = LevelsTab(
+            self._notebook,
+            get_levels=self._get_levels,
+            set_levels=self._set_levels,
+            get_input_histograms=self._input_histograms,
+            on_change=self._schedule_refresh,
+        )
+        self._notebook.add(self.levels_tab, text="Levels")
+        self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=(6, 0))
@@ -133,8 +148,10 @@ class EnhancementDialog(tk.Toplevel):
         # Update the corresponding param
         val = self._slider_vars[attr].get()
         setattr(self.app.enhancement_params, attr, val)
+        self._schedule_refresh()
 
-        # Debounce refresh
+    def _schedule_refresh(self) -> None:
+        """Debounce the display refresh (shared by sliders and levels edits)."""
         if self._refresh_after_id is not None:
             self.after_cancel(self._refresh_after_id)
         self._refresh_after_id = self.after(30, self._do_refresh)
@@ -184,7 +201,7 @@ class EnhancementDialog(tk.Toplevel):
         self.app.restore_main_focus()
 
     def sync_sliders_from_params(self) -> None:
-        """Set all slider values from the current EnhancementParams.
+        """Sync all tabs' controls from the current EnhancementParams.
 
         Uses the guard flag to prevent triggering slider change callbacks.
         """
@@ -194,7 +211,41 @@ class EnhancementDialog(tk.Toplevel):
             val = getattr(params, attr)
             var.set(val)
         self._updating_sliders = False
+        self.levels_tab.sync_from_params()
 
     def update_histogram(self, img: Image.Image | None) -> None:
         """Feed the latest preview image to the histogram panel (None blanks it)."""
         self.histogram_panel.update_from_image(img)
+
+    _LEVELS_ATTRS = {
+        "master": "levels_master",
+        "r": "levels_r",
+        "g": "levels_g",
+        "b": "levels_b",
+    }
+
+    def _get_levels(self, key: str) -> LevelsChannel:
+        return cast("LevelsChannel", getattr(self.app.enhancement_params, self._LEVELS_ATTRS[key]))
+
+    def _set_levels(self, key: str, value: LevelsChannel) -> None:
+        setattr(self.app.enhancement_params, self._LEVELS_ATTRS[key], value)
+
+    def _input_histograms(self) -> tuple[list[int], list[int]] | None:
+        """Histograms of the working image (input side of the pipeline), cached.
+
+        AIDEV-NOTE: Levels markers operate on INPUT values, so the strip shows
+        the pre-enhancement working image, not the live preview (which would
+        feed back while dragging). The cache keys on the working_image object
+        identity — every mutation (crop/rotate/Apply/undo) replaces the object.
+        """
+        img = self.app.image_model.working_image
+        if img is None:
+            return None
+        if self._input_hist_cache is None or self._input_hist_cache[0] is not img:
+            self._input_hist_cache = (img, compute_histograms(img))
+        return self._input_hist_cache[1]
+
+    def _on_tab_changed(self, _event: tk.Event) -> None:
+        """Refresh the Levels strip when its tab becomes visible (image may have changed)."""
+        if self._notebook.select() == str(self.levels_tab):  # type: ignore[no-untyped-call]
+            self.levels_tab.sync_from_params()
