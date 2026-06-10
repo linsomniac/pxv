@@ -15,12 +15,11 @@ from PIL import ImageTk
 
 from pxv.histogram_panel import render_histogram
 from pxv.tone import IDENTITY_CURVE, CurvePoints, curve_lut, equalize_curve
+from pxv.tone_ui import HIST_CHANNEL, build_channel_row
 
 CURVE_SIZE = (256, 256)
 MAX_POINTS = 16
 HIT_RADIUS = 6
-CHANNEL_KEYS = [("master", "RGB"), ("r", "R"), ("g", "G"), ("b", "B")]
-_HIST_CHANNEL = {"master": "lum", "r": "r", "g": "g", "b": "b"}
 
 
 class CurveEditor(ttk.Frame):
@@ -45,16 +44,7 @@ class CurveEditor(ttk.Frame):
         self._drag_idx: int | None = None
         self._hist_photo: ImageTk.PhotoImage | None = None
 
-        chan_row = ttk.Frame(self)
-        chan_row.pack(fill=tk.X)
-        for key, label in CHANNEL_KEYS:
-            ttk.Radiobutton(
-                chan_row,
-                text=label,
-                value=key,
-                variable=self._channel,
-                command=self.sync_from_params,
-            ).pack(side=tk.LEFT)
+        build_channel_row(self, self._channel, self.sync_from_params)
 
         w, h = CURVE_SIZE
         self._canvas = tk.Canvas(self, width=w, height=h, bg="#181818", highlightthickness=0)
@@ -101,7 +91,7 @@ class CurveEditor(ttk.Frame):
         if hists is None:
             return
         lum, rgb = hists
-        key = _HIST_CHANNEL[self._channel.get()]
+        key = HIST_CHANNEL[self._channel.get()]
         rendered = render_histogram(lum, rgb, {key}, log_scale=False, size=CURVE_SIZE)
         self._hist_photo = ImageTk.PhotoImage(rendered)
         self._redraw()

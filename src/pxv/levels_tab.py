@@ -19,11 +19,10 @@ from PIL import Image, ImageTk
 
 from pxv.histogram_panel import render_histogram
 from pxv.tone import LevelsChannel, auto_levels, gamma_to_mid, mid_to_gamma
+from pxv.tone_ui import HIST_CHANNEL, build_channel_row
 
 STRIP_SIZE = (256, 80)
 MARKER_H = 14
-CHANNEL_KEYS = [("master", "RGB"), ("r", "R"), ("g", "G"), ("b", "B")]
-_HIST_CHANNEL = {"master": "lum", "r": "r", "g": "g", "b": "b"}
 
 
 class LevelsTab(ttk.Frame):
@@ -50,16 +49,7 @@ class LevelsTab(ttk.Frame):
         self._hist_photo: ImageTk.PhotoImage | None = None
         self._grad_photo: ImageTk.PhotoImage | None = None
 
-        chan_row = ttk.Frame(self)
-        chan_row.pack(fill=tk.X)
-        for key, label in CHANNEL_KEYS:
-            ttk.Radiobutton(
-                chan_row,
-                text=label,
-                value=key,
-                variable=self._channel,
-                command=self.sync_from_params,
-            ).pack(side=tk.LEFT)
+        chan_row = build_channel_row(self, self._channel, self.sync_from_params)
         ttk.Button(chan_row, text="Auto", width=6, command=self._on_auto).pack(side=tk.RIGHT)
 
         w, h = STRIP_SIZE
@@ -128,7 +118,7 @@ class LevelsTab(ttk.Frame):
         if hists is None:
             return
         lum, rgb = hists
-        key = _HIST_CHANNEL[self._channel.get()]
+        key = HIST_CHANNEL[self._channel.get()]
         rendered = render_histogram(lum, rgb, {key}, log_scale=False, size=STRIP_SIZE)
         self._hist_photo = ImageTk.PhotoImage(rendered)
         self._hist_canvas.create_image(0, 0, anchor=tk.NW, image=self._hist_photo)
