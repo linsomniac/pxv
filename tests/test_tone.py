@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from pxv.tone import LevelsChannel, levels_lut
+import pytest
+
+from pxv.tone import (
+    LevelsChannel,
+    auto_levels,
+    compose_luts,
+    gamma_to_mid,
+    levels_lut,
+    mid_to_gamma,
+)
 
 IDENTITY = list(range(256))
 
@@ -45,3 +54,48 @@ def test_levels_lut_inverted_output() -> None:
 def test_levels_lut_degenerate_span_guard() -> None:
     lut = levels_lut(LevelsChannel(in_black=128, in_white=128))
     assert all(0 <= v <= 255 for v in lut)  # must not divide by zero
+
+
+def test_compose_luts() -> None:
+    assert compose_luts(IDENTITY, IDENTITY) == IDENTITY
+    invert = [255 - i for i in range(256)]
+    assert compose_luts(invert, invert) == IDENTITY
+    half = [i // 2 for i in range(256)]
+    assert compose_luts(half, invert)[0] == 255  # invert(half(0))
+    assert compose_luts(invert, half)[0] == 127  # half(invert(0))
+
+
+def test_auto_levels_finds_black_white_points() -> None:
+    hist = [0] * 768
+    for c in range(3):
+        hist[c * 256 + 30] = 100
+        hist[c * 256 + 220] = 100
+    r, g, b = auto_levels(hist, clip_percent=0.5)
+    for ch in (r, g, b):
+        assert ch.in_black == 30
+        assert ch.in_white == 220
+        assert ch.gamma == 1.0 and ch.out_black == 0 and ch.out_white == 255
+
+
+def test_auto_levels_empty_histogram_is_identity() -> None:
+    r, g, b = auto_levels([0] * 768)
+    assert r.is_identity() and g.is_identity() and b.is_identity()
+
+
+def test_auto_levels_degenerate_single_bin() -> None:
+    hist = [0] * 768
+    hist[128] = 1000  # R only; G/B empty
+    r, g, b = auto_levels(hist)
+    assert r.is_identity()  # hi <= lo -> identity fallback
+    assert g.is_identity() and b.is_identity()
+
+
+def test_gamma_mid_roundtrip() -> None:
+    for gamma in (0.2, 0.5, 1.0, 2.0, 5.0):
+        x = gamma_to_mid(0, 255, gamma)
+        assert mid_to_gamma(0, 255, x) == pytest.approx(gamma, rel=1e-3)
+
+
+def test_mid_to_gamma_clamps_at_extremes() -> None:
+    assert mid_to_gamma(0, 255, 0.0) == 10.0  # far left -> max gamma
+    assert mid_to_gamma(0, 255, 255.0) == 0.1  # far right -> min gamma
