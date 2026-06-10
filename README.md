@@ -102,15 +102,25 @@ Right-click for additional options: rotate, flip, resize, grab (screenshot), pri
 
 ## Enhancements
 
-The enhancement dialog (`e`) provides real-time adjustment of:
+The enhancement dialog (`e`) provides real-time adjustment with a live
+histogram (luminance + RGB overlays, log scale, clipping readouts) that tracks
+every change:
 
-- Brightness, contrast, gamma
-- Sharpen, blur
-- Saturation, hue rotation
-- Per-channel RGB color balance
+- **Sliders** — brightness, contrast, gamma, sharpen, blur, saturation, hue
+  rotation, per-channel RGB balance
+- **Levels** — black/gamma/white input markers over the channel histogram,
+  output range, Auto (percentile clip), and black/gray/white eyedroppers that
+  sample the image
+- **Curves** — spline curve editor per channel (master + R/G/B) with histogram
+  backdrop, editable histogram Equalize, and Invert — the classic xv intensity
+  and RGB graphs, modernized
+
+**Compare** (hold) flips between the original and adjusted image; **Apply**
+bakes the adjustments into the working image (undoable with `u`/Ctrl+Z).
 
 ## Features
 
+- Histogram, levels, and curves in the enhancement dialog (beyond-xv: live histogram backdrop, eyedroppers, editable equalization)
 - XV-style window sizing: window grows/shrinks to fit the displayed image, capped at the current monitor's bounds
 - Multi-monitor aware: detects per-monitor geometry via xrandr so windows don't span displays
 - EXIF-aware orientation

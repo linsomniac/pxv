@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Enhancement dialog overhaul: live histogram panel (luminance/RGB overlays,
+  log scale, clipping readouts), a Levels tab (per-channel black/gamma/white
+  markers, output range, Auto, black/gray/white eyedroppers), a Curves tab
+  (monotone spline editor per channel with histogram backdrop, editable
+  Equalize, Invert), and a hold-to-Compare before/after button. All
+  adjustments compose into a single LUT pass and bake undoably via Apply.
 - Save-options dialog: when saving as JPEG, PNG, WebP, or TIFF, a small dialog now
   lets you choose encoding parameters — JPEG quality, PNG compression level, WebP
   lossless/quality, and TIFF compression (None/LZW/Deflate) — plus a "keep metadata"

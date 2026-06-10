@@ -698,3 +698,35 @@ def test_dialog_compare_press_and_release_toggle_flag() -> None:
         assert app._compare_active is False
     finally:
         root.destroy()
+
+
+def test_apply_undo_round_trips_levels_and_curves(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from pathlib import Path
+
+    from pxv import commands
+    from pxv.app import PxvApp
+    from pxv.file_list import FileList
+    from pxv.tone import LevelsChannel
+
+    img_path: Path = tmp_path / "t.png"
+    Image.effect_noise((40, 30), 64).convert("RGB").save(img_path)
+    root = tk.Tk()
+    try:
+        app = PxvApp(root, FileList([img_path]))
+        app.load_current()
+        commands.cmd_enhancement_dialog(app)
+        dlg = app.enhancement_dialog
+        assert dlg is not None
+        app.enhancement_params.levels_master = LevelsChannel(in_black=20, gamma=1.5)
+        app.enhancement_params.curve_master = ((0, 0), (96, 160), (255, 255))
+        dlg.sync_sliders_from_params()
+        dlg._on_apply()
+        assert app.enhancement_params.is_identity()
+        assert app.history.can_undo
+        app.undo()
+        assert app.enhancement_params.levels_master == LevelsChannel(in_black=20, gamma=1.5)
+        assert app.enhancement_params.curve_master == ((0, 0), (96, 160), (255, 255))
+        assert dlg.curve_editor._points() == [(0, 0), (96, 160), (255, 255)]
+        dlg._on_close()
+    finally:
+        root.destroy()
