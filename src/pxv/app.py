@@ -373,6 +373,11 @@ class PxvApp:
             if not self.fullscreen:
                 self._resize_window_to_image(display_img.width, display_img.height)
             self.canvas_view.display(display_img)
+        # AIDEV-NOTE: The histogram tracks the post-enhancement preview — exactly
+        # what the user sees, including the background composite for transparent
+        # images (accepted in the 2026-06-10 design). None blanks the panel.
+        if self.enhancement_dialog is not None:
+            self.enhancement_dialog.update_histogram(display_img)
         self._update_title()
 
     def _resize_window_to_image(self, img_w: int, img_h: int) -> None:
@@ -394,6 +399,8 @@ class PxvApp:
         )
         if display_img is not None:
             self.canvas_view.display(display_img)
+        if self.enhancement_dialog is not None:
+            self.enhancement_dialog.update_histogram(display_img)
         self._update_title()
 
     def _update_title(self) -> None:

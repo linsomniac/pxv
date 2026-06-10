@@ -8,6 +8,8 @@ under a real display.
 
 from __future__ import annotations
 
+import types
+
 from PIL import Image
 
 from pxv.histogram_panel import (
@@ -94,3 +96,59 @@ def test_render_histogram_spike_lands_at_its_column() -> None:
     assert bg == (24, 24, 24)
     spike = out.getpixel((128, 50))
     assert spike != bg
+
+
+def _refresh_double(
+    display_img: Image.Image | None,
+) -> tuple[types.SimpleNamespace, list[Image.Image | None]]:
+    """PxvApp double for refresh_display: stubs everything the method touches."""
+    from pxv.enhancements import EnhancementParams
+
+    received: list[Image.Image | None] = []
+    app = types.SimpleNamespace(
+        image_model=types.SimpleNamespace(
+            get_display_image=lambda zoom, params, bg_color: display_img,
+            current_path=None,
+        ),
+        canvas_view=types.SimpleNamespace(zoom=1.0, display=lambda im: None),
+        enhancement_params=EnhancementParams(),
+        fullscreen=True,  # skips _resize_window_to_image
+        enhancement_dialog=types.SimpleNamespace(update_histogram=received.append),
+        _bg_color=lambda: (0, 0, 0),
+        _update_title=lambda: None,
+    )
+    return app, received
+
+
+def test_refresh_display_feeds_open_dialog() -> None:
+    from pxv.app import PxvApp
+
+    img = Image.new("RGB", (4, 4), (1, 2, 3))
+    app, received = _refresh_double(img)
+    PxvApp.refresh_display(app)
+    assert received == [img]
+
+
+def test_refresh_display_feeds_none_when_no_image() -> None:
+    from pxv.app import PxvApp
+
+    app, received = _refresh_double(None)
+    PxvApp.refresh_display(app)
+    assert received == [None]
+
+
+def test_update_display_feeds_open_dialog() -> None:
+    from pxv.app import PxvApp
+
+    img = Image.new("RGB", (4, 4), (9, 9, 9))
+    app, received = _refresh_double(img)
+    PxvApp._update_display(app)
+    assert received == [img]
+
+
+def test_refresh_display_with_no_dialog_does_not_crash() -> None:
+    from pxv.app import PxvApp
+
+    app, _received = _refresh_double(None)
+    app.enhancement_dialog = None
+    PxvApp.refresh_display(app)  # must not raise

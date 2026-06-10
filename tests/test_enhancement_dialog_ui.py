@@ -42,10 +42,14 @@ def test_histogram_panel_toggles_reach_renderer(monkeypatch: pytest.MonkeyPatch)
     real_render = hp.render_histogram
 
     def recording_render(
-        lum: list[int], rgb: list[int], channels: set[str], log_scale: bool
+        lum: list[int],
+        rgb: list[int],
+        channels: set[str],
+        log_scale: bool,
+        size: tuple[int, int] = hp.HIST_SIZE,
     ) -> "Image.Image":
         calls.append((channels, log_scale))
-        return real_render(lum, rgb, channels, log_scale)
+        return real_render(lum, rgb, channels, log_scale, size)
 
     monkeypatch.setattr(hp, "render_histogram", recording_render)
     root = tk.Tk()
@@ -112,5 +116,18 @@ def test_dialog_update_histogram_delegates_to_panel() -> None:
         dlg.update_histogram(None)
         assert dlg.histogram_panel._photo is None
         dlg._on_close()
+    finally:
+        root.destroy()
+
+
+def test_cmd_enhancement_dialog_seeds_histogram_via_refresh() -> None:
+    from pxv import commands
+
+    app, root = _make_app()
+    try:
+        commands.cmd_enhancement_dialog(app)
+        assert app.enhancement_dialog is not None
+        assert app.refresh_calls == [True]
+        app.enhancement_dialog._on_close()
     finally:
         root.destroy()

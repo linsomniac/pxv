@@ -445,6 +445,9 @@ def cmd_enhancement_dialog(app: PxvApp) -> None:
             app.enhancement_dialog = None
 
     app.enhancement_dialog = EnhancementDialog(app)
+    # Seed the histogram panel: the refresh paths feed it on every render, but
+    # a freshly opened dialog needs one render to pull the current image in.
+    app.refresh_display()
 
 
 def cmd_toggle_fullscreen(app: PxvApp) -> None:
