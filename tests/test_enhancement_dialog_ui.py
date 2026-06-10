@@ -543,3 +543,106 @@ def test_canvas_pick_outside_image_delivers_none() -> None:
         assert picks == [None]
     finally:
         root.destroy()
+
+
+def _levels_tab_with_pick(
+    root: "tk.Tk", sample: tuple[int, int, int] | None
+) -> tuple[object, dict[str, object], list[bool]]:
+    """LevelsTab whose request_pick immediately delivers `sample`."""
+    from pxv.histogram_panel import compute_histograms
+    from pxv.levels_tab import LevelsTab
+    from pxv.tone import LevelsChannel
+
+    store: dict[str, LevelsChannel] = {key: LevelsChannel() for key in ("master", "r", "g", "b")}
+    changes: list[bool] = []
+    hists = compute_histograms(Image.new("RGB", (16, 16), (10, 200, 60)))
+
+    def request_pick(on_sample):  # noqa: ANN001, ANN202 - test double
+        on_sample(sample)
+        return lambda: None
+
+    tab = LevelsTab(
+        root,
+        get_levels=store.__getitem__,
+        set_levels=store.__setitem__,
+        get_input_histograms=lambda: hists,
+        on_change=lambda: changes.append(True),
+        request_pick=request_pick,
+    )
+    return tab, store, changes
+
+
+def test_eyedropper_black_sets_per_channel_black_points() -> None:
+    root = tk.Tk()
+    try:
+        tab, store, changes = _levels_tab_with_pick(root, (10, 60, 30))
+        tab._on_eyedropper("black")
+        assert store["r"].in_black == 10
+        assert store["g"].in_black == 60
+        assert store["b"].in_black == 30
+        assert store["master"].is_identity()
+        assert changes
+    finally:
+        root.destroy()
+
+
+def test_eyedropper_white_sets_per_channel_white_points() -> None:
+    root = tk.Tk()
+    try:
+        tab, store, _changes = _levels_tab_with_pick(root, (240, 200, 220))
+        tab._on_eyedropper("white")
+        assert store["r"].in_white == 240
+        assert store["g"].in_white == 200
+        assert store["b"].in_white == 220
+    finally:
+        root.destroy()
+
+
+def test_eyedropper_gray_sets_balancing_gammas() -> None:
+    from pxv.tone import gray_balance_gammas
+
+    root = tk.Tk()
+    try:
+        tab, store, _changes = _levels_tab_with_pick(root, (200, 128, 100))
+        tab._on_eyedropper("gray")
+        gr, gg, gb = gray_balance_gammas((200, 128, 100))
+        assert store["r"].gamma == gr
+        assert store["g"].gamma == gg
+        assert store["b"].gamma == gb
+    finally:
+        root.destroy()
+
+
+def test_eyedropper_cancelled_pick_changes_nothing() -> None:
+    root = tk.Tk()
+    try:
+        tab, store, changes = _levels_tab_with_pick(root, None)
+        tab._on_eyedropper("black")
+        assert all(store[k].is_identity() for k in ("master", "r", "g", "b"))
+        assert changes == []
+    finally:
+        root.destroy()
+
+
+def test_dialog_request_pick_samples_working_image() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        samples: list[tuple[int, int, int] | None] = []
+        cancel = dlg._request_pick(samples.append)
+        # The canvas is now armed; simulate a hit at image coords (2, 3).
+        cb = app.canvas_view._pick_callback
+        assert cb is not None
+        app.canvas_view.set_pick_callback(None, None)
+        cb((2, 3))
+        assert samples == [(120, 90, 200)]  # _make_app's working_image color
+        # Cancel path: re-arm then cancel -> delivers None and disarms.
+        cancel = dlg._request_pick(samples.append)
+        cancel()
+        assert samples[-1] is None
+        assert app.canvas_view._pick_callback is None
+        dlg._on_close()
+    finally:
+        root.destroy()

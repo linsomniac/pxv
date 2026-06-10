@@ -18,7 +18,7 @@ from typing import Any
 from PIL import Image, ImageTk
 
 from pxv.histogram_panel import render_histogram
-from pxv.tone import LevelsChannel, auto_levels, gamma_to_mid, mid_to_gamma
+from pxv.tone import LevelsChannel, auto_levels, gamma_to_mid, gray_balance_gammas, mid_to_gamma
 from pxv.tone_ui import HIST_CHANNEL, build_channel_row
 
 STRIP_SIZE = (256, 80)
@@ -36,12 +36,17 @@ class LevelsTab(ttk.Frame):
         set_levels: Callable[[str, LevelsChannel], None],
         get_input_histograms: Callable[[], tuple[list[int], list[int]] | None],
         on_change: Callable[[], None],
+        request_pick: Callable[[Callable[[tuple[int, int, int] | None], None]], Callable[[], None]]
+        | None = None,
     ) -> None:
         super().__init__(parent, padding=6)
         self._get_levels = get_levels
         self._set_levels = set_levels
         self._get_input_histograms = get_input_histograms
         self._on_change = on_change
+        self._request_pick = request_pick
+        self._pick_cancel: Callable[[], None] | None = None
+        self._pick_kind: str | None = None
 
         self._channel = tk.StringVar(value="master")
         self._updating = False  # guard: programmatic spinbox writes
@@ -86,6 +91,17 @@ class LevelsTab(ttk.Frame):
             spin.bind("<FocusOut>", lambda _e: self._on_spin_change())
             spin.pack(side=tk.LEFT, padx=(0, 6))
             self._spins[field] = spin
+
+        pick_row = ttk.Frame(self)
+        pick_row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(pick_row, text="Pick:").pack(side=tk.LEFT, padx=(0, 4))
+        for kind, label in (("black", "Black"), ("gray", "Gray"), ("white", "White")):
+            ttk.Button(
+                pick_row,
+                text=label,
+                width=6,
+                command=lambda k=kind: self._on_eyedropper(k),  # type: ignore[misc]
+            ).pack(side=tk.LEFT, padx=2)
 
         self.sync_from_params()
 
@@ -236,5 +252,50 @@ class LevelsTab(ttk.Frame):
         for key, ch in (("r", r), ("g", g), ("b", b)):
             current = self._get_levels(key)
             self._set_levels(key, replace(current, in_black=ch.in_black, in_white=ch.in_white))
+        self._on_change()
+        self.sync_from_params()
+
+    def _on_eyedropper(self, kind: str) -> None:
+        """Arm a one-shot pick on the main canvas; second press cancels.
+
+        AIDEV-NOTE: No root <Escape> cancel binding on purpose — tkinter's
+        unbind(seq, funcid) removes ALL bindings for the sequence (bpo-31485),
+        so a temporary bind would clobber future root Escape bindings.
+        Cancel paths: press the same button again, press another eyedropper
+        (re-arms), or click outside the image (delivers None).
+        """
+        if self._request_pick is None:
+            return
+        if self._pick_cancel is not None:
+            cancel, armed = self._pick_cancel, self._pick_kind
+            self._pick_cancel = None
+            self._pick_kind = None
+            cancel()
+            if armed == kind:
+                return  # second press on the same button = plain cancel
+
+        def on_sample(sample: tuple[int, int, int] | None) -> None:
+            self._pick_cancel = None
+            self._pick_kind = None
+            self._apply_pick(kind, sample)
+
+        self._pick_cancel = self._request_pick(on_sample)
+        self._pick_kind = kind
+
+    def _apply_pick(self, kind: str, sample: tuple[int, int, int] | None) -> None:
+        """Apply a sampled pixel to per-channel levels (black/white/gray)."""
+        if sample is None:
+            return
+        if kind == "gray":
+            for key, gamma in zip(("r", "g", "b"), gray_balance_gammas(sample)):
+                self._set_levels(key, replace(self._get_levels(key), gamma=gamma))
+        else:
+            for key, value in zip(("r", "g", "b"), sample):
+                ch = self._get_levels(key)
+                if kind == "black":
+                    ch = replace(ch, in_black=min(value, ch.in_white - 1))
+                else:
+                    ch = replace(ch, in_white=max(value, ch.in_black + 1))
+                self._set_levels(key, ch)
         self._on_change()
         self.sync_from_params()

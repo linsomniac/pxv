@@ -86,6 +86,7 @@ class EnhancementDialog(tk.Toplevel):
             set_levels=self._set_levels,
             get_input_histograms=self._input_histograms,
             on_change=self._schedule_refresh,
+            request_pick=self._request_pick,
         )
         self._notebook.add(self.levels_tab, text="Levels")
 
@@ -263,6 +264,35 @@ class EnhancementDialog(tk.Toplevel):
 
     def _set_curve(self, key: str, value: CurvePoints) -> None:
         setattr(self.app.enhancement_params, self._CURVE_ATTRS[key], value)
+
+    def _request_pick(
+        self, on_sample: Callable[[tuple[int, int, int] | None], None]
+    ) -> Callable[[], None]:
+        """Arm a one-shot eyedropper pick on the main canvas; returns a cancel.
+
+        AIDEV-NOTE: Samples the WORKING image (input side), consistent with the
+        Levels strip — see the spec's eyedropper-approximation note. No image
+        means an immediate None delivery.
+        """
+        img = self.app.image_model.working_image
+        if img is None:
+            on_sample(None)
+            return lambda: None
+
+        def deliver(coords: tuple[int, int] | None) -> None:
+            if coords is None:
+                on_sample(None)
+                return
+            pixel = img.getpixel(coords)
+            on_sample((int(pixel[0]), int(pixel[1]), int(pixel[2])))  # type: ignore[index]
+
+        self.app.canvas_view.set_pick_callback(deliver, img.size)
+
+        def cancel() -> None:
+            self.app.canvas_view.set_pick_callback(None, None)
+            on_sample(None)
+
+        return cancel
 
     def _input_histograms(self) -> tuple[list[int], list[int]] | None:
         """Histograms of the working image (input side of the pipeline), cached.
