@@ -246,13 +246,17 @@ def test_levels_tab_gamma_marker_drag_roundtrips() -> None:
 
 
 def test_levels_tab_output_markers_cannot_cross_by_drag() -> None:
+    from pxv.tone import LevelsChannel
+
     root = tk.Tk()
     try:
         tab, store, _changes = _make_levels_tab(root)
+        store["master"] = LevelsChannel(out_black=0, out_white=60)
+        tab.sync_from_params()
         tab._on_out_press(types.SimpleNamespace(x=2))  # nearest = out_black
         tab._on_out_drag(types.SimpleNamespace(x=240))
         tab._on_release(types.SimpleNamespace())
-        assert store["master"].out_black <= store["master"].out_white
+        assert store["master"].out_black == 60  # clamped: markers may meet, never cross
     finally:
         root.destroy()
 
