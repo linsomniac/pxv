@@ -10,6 +10,7 @@ from pxv.enhancements import (
     _build_lut,
     apply_enhancements,
 )
+from pxv.tone import LevelsChannel
 
 
 def test_is_identity_default() -> None:
@@ -93,3 +94,42 @@ def test_blur_applied_even_at_low_zoom() -> None:
     p.blur = 2.0
     blurred = apply_enhancements(img, p, zoom=0.5)
     assert blurred.tobytes() != sharp.tobytes()
+
+
+def test_params_identity_covers_levels() -> None:
+    p = EnhancementParams()
+    assert p.is_identity()
+    p.levels_r = LevelsChannel(in_black=10)
+    assert not p.is_identity()
+    p.reset()
+    assert p.is_identity()
+
+
+def test_apply_enhancements_master_levels() -> None:
+    img = Image.new("RGB", (2, 2), (64, 128, 192))
+    p = EnhancementParams()
+    p.levels_master = LevelsChannel(in_black=64, in_white=192)
+    out = apply_enhancements(img, p)
+    assert out.getpixel((0, 0)) == (0, 128, 255)
+
+
+def test_apply_enhancements_per_channel_levels() -> None:
+    img = Image.new("RGB", (2, 2), (100, 100, 100))
+    p = EnhancementParams()
+    p.levels_r = LevelsChannel(out_black=255, out_white=0)  # invert R only
+    out = apply_enhancements(img, p)
+    assert out.getpixel((0, 0)) == (155, 100, 100)
+
+
+def test_apply_enhancements_master_before_channel_levels() -> None:
+    # Master maps 128 -> 50 (out_white=100); the R channel's in_black=100 then
+    # cuts 50 to 0. The reversed order would give R ~18, so this pins the
+    # spec's fixed composition order: master levels BEFORE channel levels.
+    img = Image.new("RGB", (1, 1), (128, 128, 128))
+    p = EnhancementParams()
+    p.levels_master = LevelsChannel(out_white=100)
+    p.levels_r = LevelsChannel(in_black=100)
+    out = apply_enhancements(img, p)
+    px = out.getpixel((0, 0))
+    assert px[0] == 0
+    assert px[1] == 50 and px[2] == 50  # master only on G/B

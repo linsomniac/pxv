@@ -1,8 +1,8 @@
 """Enhancement parameters and the image enhancement pipeline.
 
 AIDEV-NOTE: The apply_enhancements pipeline order matters:
-  Contrast -> Saturation -> Hue rotation -> Combined LUT (brightness+gamma+RGB) -> Blur -> Sharpen
-The combined LUT merges brightness, gamma, and per-channel color balance into a single
+  Contrast -> Saturation -> Hue rotation -> Combined LUT (brightness+gamma+RGB+levels) -> Blur -> Sharpen
+The combined LUT merges brightness, gamma, per-channel color balance, and levels into a single
 Image.point() call with a 768-entry lookup table for performance.
 """
 
@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PIL import Image, ImageEnhance, ImageFilter
+
+from pxv.tone import LevelsChannel, compose_luts, levels_lut
 
 
 @dataclass
@@ -27,6 +29,10 @@ class EnhancementParams:
     b_balance: float = 1.0  # 0.0-2.0
     sharpen: float = 1.0  # 0.0-3.0
     blur: float = 0.0  # 0.0-10.0
+    levels_master: LevelsChannel = LevelsChannel()
+    levels_r: LevelsChannel = LevelsChannel()
+    levels_g: LevelsChannel = LevelsChannel()
+    levels_b: LevelsChannel = LevelsChannel()
 
     def is_identity(self) -> bool:
         """Return True if all parameters are at their default (no-op) values."""
@@ -41,6 +47,10 @@ class EnhancementParams:
             and self.b_balance == 1.0
             and self.sharpen == 1.0
             and self.blur == 0.0
+            and self.levels_master.is_identity()
+            and self.levels_r.is_identity()
+            and self.levels_g.is_identity()
+            and self.levels_b.is_identity()
         )
 
     def reset(self) -> None:
@@ -55,6 +65,10 @@ class EnhancementParams:
         self.b_balance = 1.0
         self.sharpen = 1.0
         self.blur = 0.0
+        self.levels_master = LevelsChannel()
+        self.levels_r = LevelsChannel()
+        self.levels_g = LevelsChannel()
+        self.levels_b = LevelsChannel()
 
 
 # AIDEV-NOTE: Slider metadata used by the enhancement dialog to build sliders.
@@ -138,18 +152,35 @@ def apply_enhancements(
     if params.hue_offset != 0:
         result = _apply_hue_rotation(result, params.hue_offset)
 
-    # 4. Combined LUT pass (brightness + gamma + RGB balance)
+    # 4. Combined LUT pass (brightness + gamma + RGB balance + levels)
+    levels_active = not (
+        params.levels_master.is_identity()
+        and params.levels_r.is_identity()
+        and params.levels_g.is_identity()
+        and params.levels_b.is_identity()
+    )
     needs_lut = (
         params.brightness != 1.0
         or params.gamma != 1.0
         or params.r_balance != 1.0
         or params.g_balance != 1.0
         or params.b_balance != 1.0
+        or levels_active
     )
     if needs_lut:
-        lut = _build_lut(
+        base = _build_lut(
             params.brightness, params.gamma, params.r_balance, params.g_balance, params.b_balance
         )
+        if levels_active:
+            # AIDEV-NOTE: Fixed composition order per the 2026-06-10 design:
+            # base (brightness+gamma+balance) -> master levels -> channel
+            # levels. Curves will append here in Phase 3.
+            master = levels_lut(params.levels_master)
+            lut: list[int] = []
+            for idx, ch in enumerate((params.levels_r, params.levels_g, params.levels_b)):
+                lut.extend(compose_luts(base[idx * 256 : (idx + 1) * 256], master, levels_lut(ch)))
+        else:
+            lut = base
         result = result.point(lut)
 
     # 5. Blur (radius scaled by zoom for preview parity)
