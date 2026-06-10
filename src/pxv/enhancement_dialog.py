@@ -203,6 +203,10 @@ class EnhancementDialog(tk.Toplevel):
         if self._refresh_after_id is not None:
             self.after_cancel(self._refresh_after_id)
             self._refresh_after_id = None
+        # AIDEV-NOTE: Disarm any in-flight eyedropper pick — same stray-callback
+        # class as the debounce timer above; the canvas must not deliver into a
+        # destroyed dialog.
+        self.app.canvas_view.set_pick_callback(None, None)
         self.app.enhancement_dialog = None
         self.destroy()
         # AIDEV-NOTE: Reclaim keyboard focus for the main window AFTER teardown —
@@ -280,6 +284,12 @@ class EnhancementDialog(tk.Toplevel):
             return lambda: None
 
         def deliver(coords: tuple[int, int] | None) -> None:
+            # AIDEV-NOTE: The working image may have been replaced (rotate/undo/
+            # navigation) while armed — geometry and pixels would be stale, so
+            # treat the pick as cancelled.
+            if self.app.image_model.working_image is not img:
+                on_sample(None)
+                return
             if coords is None:
                 on_sample(None)
                 return

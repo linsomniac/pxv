@@ -646,3 +646,35 @@ def test_dialog_request_pick_samples_working_image() -> None:
         dlg._on_close()
     finally:
         root.destroy()
+
+
+def test_close_with_armed_pick_disarms_canvas() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        dlg._request_pick(lambda _s: None)
+        assert app.canvas_view._pick_callback is not None
+        dlg._on_close()
+        assert app.canvas_view._pick_callback is None
+    finally:
+        root.destroy()
+
+
+def test_pick_after_image_replacement_delivers_none() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        samples: list[tuple[int, int, int] | None] = []
+        dlg._request_pick(samples.append)
+        cb = app.canvas_view._pick_callback
+        app.canvas_view.set_pick_callback(None, None)
+        app.image_model.working_image = Image.new("RGB", (8, 8), (5, 5, 5))
+        cb((2, 3))
+        assert samples == [None]
+        dlg._on_close()
+    finally:
+        root.destroy()
