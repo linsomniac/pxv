@@ -1,4 +1,4 @@
-"""Pure tone-mapping math for levels (and, in a later phase, curves).
+"""Pure tone-mapping math for levels and curves.
 
 AIDEV-NOTE: Everything here is display-free and unit-tested headlessly.
 LevelsChannel is FROZEN on purpose: EnhancementParams snapshots use

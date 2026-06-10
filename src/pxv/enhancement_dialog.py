@@ -229,8 +229,9 @@ class EnhancementDialog(tk.Toplevel):
         self.histogram_panel.update_from_image(img)
         # AIDEV-NOTE: Geometry ops (crop/rotate/flip/resize) replace
         # working_image and refresh the display while the Levels tab may be
-        # frontmost — resync its strip, but only when the input image actually
-        # changed, so marker-drag refreshes don't redraw the strip every 30ms.
+        # frontmost — resync its strip and the curve editor's backdrop, but only
+        # when the input image actually changed, so marker-drag refreshes don't
+        # redraw the strip every 30ms.
         cached = self._input_hist_cache
         current = self.app.image_model.working_image
         if current is not None and (cached is None or cached[0] is not current):

@@ -63,6 +63,9 @@ class CurveEditor(ttk.Frame):
         self._canvas.bind("<B1-Motion>", self._on_drag)
         self._canvas.bind("<ButtonRelease-1>", self._on_release)
         self._canvas.bind("<Button-3>", self._on_right_click)
+        # AIDEV-NOTE: Right-click is Button-3 on Linux/Windows, Button-2 on
+        # macOS Aqua Tk — bind both, same convention as canvas_view.py.
+        self._canvas.bind("<Button-2>", self._on_right_click)
 
         btn_row = ttk.Frame(self)
         btn_row.pack(fill=tk.X, pady=(6, 0))
