@@ -9,8 +9,10 @@ channel/log toggles re-render without needing a new image.
 from __future__ import annotations
 
 import math
+import tkinter as tk
+from tkinter import ttk
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 
 HIST_SIZE = (256, 100)
 
@@ -88,3 +90,58 @@ def render_histogram(
             draw.polygon(points, fill=(*color, 110))
             base = Image.alpha_composite(base, layer)
     return base.convert("RGB")
+
+
+class HistogramPanel(ttk.Frame):
+    """Histogram display with channel toggles, log scale, and clipping readouts."""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent)
+        self._lum: list[int] | None = None
+        self._rgb: list[int] | None = None
+        # AIDEV-NOTE: Tkinter garbage-collects PhotoImage if no Python reference
+        # exists (same pattern as CanvasView._photo_image) — keep one here.
+        self._photo: ImageTk.PhotoImage | None = None
+
+        w, h = HIST_SIZE
+        self._canvas = tk.Canvas(self, width=w, height=h, bg="#181818", highlightthickness=0)
+        self._canvas.pack(fill=tk.X)
+
+        controls = ttk.Frame(self)
+        controls.pack(fill=tk.X, pady=(2, 0))
+        self._channel_vars: dict[str, tk.BooleanVar] = {}
+        for key, label, _color in CHANNELS:
+            var = tk.BooleanVar(value=(key == "lum"))
+            ttk.Checkbutton(controls, text=label, variable=var, command=self._redraw).pack(
+                side=tk.LEFT
+            )
+            self._channel_vars[key] = var
+        self._log_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(controls, text="Log", variable=self._log_var, command=self._redraw).pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        self._clip_label = ttk.Label(controls, text="")
+        self._clip_label.pack(side=tk.RIGHT)
+
+    def update_from_image(self, img: Image.Image | None) -> None:
+        """Recompute histograms from a new preview image (None blanks the panel)."""
+        if img is None:
+            self._lum = None
+            self._rgb = None
+        else:
+            self._lum, self._rgb = compute_histograms(img)
+        self._redraw()
+
+    def _redraw(self) -> None:
+        """Re-render from the cached histograms (channel/log toggles reuse them)."""
+        self._canvas.delete("all")
+        if self._lum is None or self._rgb is None:
+            self._photo = None
+            self._clip_label.config(text="")
+            return
+        enabled = {key for key, var in self._channel_vars.items() if var.get()}
+        rendered = render_histogram(self._lum, self._rgb, enabled, self._log_var.get())
+        self._photo = ImageTk.PhotoImage(rendered)
+        self._canvas.create_image(0, 0, anchor=tk.NW, image=self._photo)
+        lo, hi = clipping_percentages(self._rgb)
+        self._clip_label.config(text=f"◂{lo:.1f}%  {hi:.1f}%▸")
