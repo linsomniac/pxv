@@ -86,6 +86,7 @@ class CurveEditor(ttk.Frame):
 
     def sync_from_params(self) -> None:
         """Redraw backdrop and curve from the current channel (switch/undo/Apply)."""
+        self._drag_idx = None  # undo/external resync mid-drag: stale idx would IndexError
         self._redraw_backdrop()
         self._redraw()
 

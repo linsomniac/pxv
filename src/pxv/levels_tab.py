@@ -218,11 +218,15 @@ class LevelsTab(ttk.Frame):
             in_white = int(float(self._spins["in_white"].get()))
             out_black = int(float(self._spins["out_black"].get()))
             out_white = int(float(self._spins["out_white"].get()))
-        except ValueError:
+        except (ValueError, tk.TclError):
             return  # ignore partial/invalid input; the next valid edit wins
         in_black = min(254, max(0, in_black))
         in_white = min(255, max(in_black + 1, in_white))
         gamma = min(10.0, max(0.1, gamma))
+        # AIDEV-NOTE: Spinboxes deliberately allow out_black > out_white
+        # (output inversion / negative effect — levels_lut supports it);
+        # marker DRAGS clamp no-cross because accidental inversion while
+        # dragging feels broken. Intentional asymmetry.
         out_black = min(255, max(0, out_black))
         out_white = min(255, max(0, out_white))
         self._put(
@@ -240,6 +244,7 @@ class LevelsTab(ttk.Frame):
             return
         r, g, b = auto_levels(hists[1])
         for key, ch in (("r", r), ("g", g), ("b", b)):
-            self._set_levels(key, ch)
+            current = self._get_levels(key)
+            self._set_levels(key, replace(current, in_black=ch.in_black, in_white=ch.in_white))
         self._on_change()
         self.sync_from_params()

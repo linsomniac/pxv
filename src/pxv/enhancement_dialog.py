@@ -12,6 +12,7 @@ from collections.abc import Callable
 from tkinter import ttk
 from typing import TYPE_CHECKING, cast
 
+from pxv.curve_editor import CurveEditor
 from pxv.enhancements import COLOR_SLIDER_SPECS, SLIDER_SPECS
 from pxv.histogram_panel import HistogramPanel, compute_histograms
 from pxv.levels_tab import LevelsTab
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from PIL import Image
 
     from pxv.app import PxvApp
-    from pxv.tone import LevelsChannel
+    from pxv.tone import CurvePoints, LevelsChannel
 
 
 class EnhancementDialog(tk.Toplevel):
@@ -64,7 +65,7 @@ class EnhancementDialog(tk.Toplevel):
         self.histogram_panel.pack(fill=tk.X, pady=(0, 6))
 
         # AIDEV-NOTE: Tabbed layout per the 2026-06-10 histogram/levels/curves
-        # design — Sliders+Levels today; Curves arrives in a later phase.
+        # design — Sliders, Levels, and Curves tabs; eyedroppers/Compare arrive in Phase 4.
         self._notebook = ttk.Notebook(main_frame)
         self._notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -87,6 +88,15 @@ class EnhancementDialog(tk.Toplevel):
             on_change=self._schedule_refresh,
         )
         self._notebook.add(self.levels_tab, text="Levels")
+
+        self.curve_editor = CurveEditor(
+            self._notebook,
+            get_curve=self._get_curve,
+            set_curve=self._set_curve,
+            get_input_histograms=self._input_histograms,
+            on_change=self._schedule_refresh,
+        )
+        self._notebook.add(self.curve_editor, text="Curves")
         self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         btn_frame = ttk.Frame(main_frame)
@@ -212,6 +222,7 @@ class EnhancementDialog(tk.Toplevel):
             var.set(val)
         self._updating_sliders = False
         self.levels_tab.sync_from_params()
+        self.curve_editor.sync_from_params()
 
     def update_histogram(self, img: Image.Image | None) -> None:
         """Feed the latest preview image to the histogram panel (None blanks it)."""
@@ -224,6 +235,7 @@ class EnhancementDialog(tk.Toplevel):
         current = self.app.image_model.working_image
         if current is not None and (cached is None or cached[0] is not current):
             self.levels_tab.sync_from_params()
+            self.curve_editor.sync_from_params()
 
     _LEVELS_ATTRS = {
         "master": "levels_master",
@@ -237,6 +249,19 @@ class EnhancementDialog(tk.Toplevel):
 
     def _set_levels(self, key: str, value: LevelsChannel) -> None:
         setattr(self.app.enhancement_params, self._LEVELS_ATTRS[key], value)
+
+    _CURVE_ATTRS = {
+        "master": "curve_master",
+        "r": "curve_r",
+        "g": "curve_g",
+        "b": "curve_b",
+    }
+
+    def _get_curve(self, key: str) -> CurvePoints:
+        return cast("CurvePoints", getattr(self.app.enhancement_params, self._CURVE_ATTRS[key]))
+
+    def _set_curve(self, key: str, value: CurvePoints) -> None:
+        setattr(self.app.enhancement_params, self._CURVE_ATTRS[key], value)
 
     def _input_histograms(self) -> tuple[list[int], list[int]] | None:
         """Histograms of the working image (input side of the pipeline), cached.
@@ -254,6 +279,9 @@ class EnhancementDialog(tk.Toplevel):
         return self._input_hist_cache[1]
 
     def _on_tab_changed(self, _event: tk.Event) -> None:
-        """Refresh the Levels strip when its tab becomes visible (image may have changed)."""
-        if self._notebook.select() == str(self.levels_tab):  # type: ignore[no-untyped-call]
+        """Resync the newly shown tone tab (the image may have changed since)."""
+        selected = self._notebook.select()  # type: ignore[no-untyped-call]
+        if selected == str(self.levels_tab):
             self.levels_tab.sync_from_params()
+        elif selected == str(self.curve_editor):
+            self.curve_editor.sync_from_params()

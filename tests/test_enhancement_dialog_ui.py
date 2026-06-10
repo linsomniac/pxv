@@ -269,7 +269,7 @@ def test_dialog_has_levels_tab_wired_to_params() -> None:
     try:
         dlg = EnhancementDialog(app)
         tabs = [dlg._notebook.tab(tab_id, "text") for tab_id in dlg._notebook.tabs()]
-        assert tabs == ["Sliders", "Levels"]
+        assert tabs[:2] == ["Sliders", "Levels"]
         # Widget edits land in the app params...
         dlg.levels_tab._put(in_black=12)
         assert app.enhancement_params.levels_master.in_black == 12
@@ -450,5 +450,51 @@ def test_curve_editor_buttons() -> None:
         editor._on_equalize()
         assert store["master"] != ((0, 0), (255, 255))  # CDF of the test image
         assert len(changes) >= 3
+    finally:
+        root.destroy()
+
+
+def test_dialog_has_curves_tab_wired_to_params() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        tabs = [dlg._notebook.tab(tab_id, "text") for tab_id in dlg._notebook.tabs()]
+        assert tabs == ["Sliders", "Levels", "Curves"]
+        dlg.curve_editor._put([(0, 0), (100, 180), (255, 255)])
+        assert app.enhancement_params.curve_master == ((0, 0), (100, 180), (255, 255))
+        # Sync back (undo path):
+        app.enhancement_params.curve_master = ((0, 10), (255, 245))
+        dlg.sync_sliders_from_params()  # must not raise; editor redraws
+        assert dlg.curve_editor._points() == [(0, 10), (255, 245)]
+        dlg._on_close()
+    finally:
+        root.destroy()
+
+
+def test_levels_auto_preserves_user_gamma_and_output() -> None:
+    from pxv.tone import LevelsChannel
+
+    root = tk.Tk()
+    try:
+        tab, store, _changes = _make_levels_tab(root)
+        store["r"] = LevelsChannel(gamma=2.0, out_black=10)
+        tab._on_auto()
+        assert store["r"].gamma == 2.0  # Auto only touches black/white points
+        assert store["r"].out_black == 10
+    finally:
+        root.destroy()
+
+
+def test_curve_editor_external_resync_cancels_drag() -> None:
+    root = tk.Tk()
+    try:
+        editor, store, _changes = _make_curve_editor(root)
+        editor._on_press(types.SimpleNamespace(x=128, y=128))  # adds + grabs idx 1
+        store["master"] = ((0, 0), (255, 255))  # external change (undo path)
+        editor.sync_from_params()
+        editor._on_drag(types.SimpleNamespace(x=200, y=50))  # must be a no-op, not IndexError
+        assert store["master"] == ((0, 0), (255, 255))
     finally:
         root.destroy()
