@@ -356,3 +356,99 @@ def test_dialog_input_histogram_cache_keyed_on_working_image() -> None:
         dlg._on_close()
     finally:
         root.destroy()
+
+
+def _make_curve_editor(
+    root: "tk.Tk",
+) -> tuple[object, dict[str, object], list[bool]]:
+    """CurveEditor wired to a dict-backed store — no app or dialog needed."""
+    from pxv.curve_editor import CurveEditor
+    from pxv.histogram_panel import compute_histograms
+    from pxv.tone import IDENTITY_CURVE
+
+    store: dict[str, tuple[tuple[int, int], ...]] = {
+        key: IDENTITY_CURVE for key in ("master", "r", "g", "b")
+    }
+    changes: list[bool] = []
+    hists = compute_histograms(Image.new("RGB", (16, 16), (10, 200, 60)))
+    editor = CurveEditor(
+        root,
+        get_curve=store.__getitem__,
+        set_curve=store.__setitem__,
+        get_input_histograms=lambda: hists,
+        on_change=lambda: changes.append(True),
+    )
+    return editor, store, changes
+
+
+def test_curve_editor_builds_with_backdrop_and_identity() -> None:
+    root = tk.Tk()
+    try:
+        editor, store, _changes = _make_curve_editor(root)
+        assert editor._hist_photo is not None
+        assert store["master"] == ((0, 0), (255, 255))
+    finally:
+        root.destroy()
+
+
+def test_curve_editor_click_adds_point_and_drag_moves_it() -> None:
+    root = tk.Tk()
+    try:
+        editor, store, changes = _make_curve_editor(root)
+        editor._on_press(types.SimpleNamespace(x=128, y=64))  # empty area -> add
+        assert len(store["master"]) == 3
+        assert (128, 191) in store["master"]  # canvas y=64 -> value 255-64
+        editor._on_drag(types.SimpleNamespace(x=140, y=55))
+        assert (140, 200) in store["master"]
+        editor._on_release(types.SimpleNamespace())
+        assert changes
+    finally:
+        root.destroy()
+
+
+def test_curve_editor_drag_clamps_x_between_neighbors_and_pins_endpoints() -> None:
+    root = tk.Tk()
+    try:
+        editor, store, _changes = _make_curve_editor(root)
+        editor._on_press(types.SimpleNamespace(x=128, y=128))  # add mid point
+        editor._on_drag(types.SimpleNamespace(x=300, y=128))  # past right endpoint
+        xs = [p[0] for p in store["master"]]
+        assert xs == sorted(xs) and xs[-1] == 255 and xs[1] == 254  # clamped
+        editor._on_release(types.SimpleNamespace())
+        # Endpoint: x pinned, y free.
+        editor._on_press(types.SimpleNamespace(x=0, y=255))  # grab (0, 0)
+        editor._on_drag(types.SimpleNamespace(x=80, y=200))
+        assert store["master"][0] == (0, 55)  # x stayed 0, y moved
+        editor._on_release(types.SimpleNamespace())
+    finally:
+        root.destroy()
+
+
+def test_curve_editor_right_click_deletes_only_interior_points() -> None:
+    root = tk.Tk()
+    try:
+        editor, store, _changes = _make_curve_editor(root)
+        editor._on_press(types.SimpleNamespace(x=128, y=128))
+        editor._on_release(types.SimpleNamespace())
+        assert len(store["master"]) == 3
+        editor._on_right_click(types.SimpleNamespace(x=128, y=128))
+        assert len(store["master"]) == 2
+        editor._on_right_click(types.SimpleNamespace(x=0, y=255))  # endpoint
+        assert len(store["master"]) == 2  # endpoints undeletable
+    finally:
+        root.destroy()
+
+
+def test_curve_editor_buttons() -> None:
+    root = tk.Tk()
+    try:
+        editor, store, changes = _make_curve_editor(root)
+        editor._on_invert()
+        assert store["master"] == ((0, 255), (255, 0))
+        editor._on_reset_curve()
+        assert store["master"] == ((0, 0), (255, 255))
+        editor._on_equalize()
+        assert store["master"] != ((0, 0), (255, 255))  # CDF of the test image
+        assert len(changes) >= 3
+    finally:
+        root.destroy()
