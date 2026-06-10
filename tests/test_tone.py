@@ -10,6 +10,7 @@ from pxv.tone import (
     auto_levels,
     compose_luts,
     curve_lut,
+    equalize_curve,
     gamma_to_mid,
     levels_lut,
     mid_to_gamma,
@@ -162,3 +163,34 @@ def test_curve_lut_rejects_bad_input() -> None:
         curve_lut(((0, 0),))
     with pytest.raises(ValueError):
         curve_lut(((0, 0), (0, 255)))  # x not strictly increasing
+
+
+def test_equalize_curve_two_spike_histogram() -> None:
+    hist = [0] * 256
+    hist[50] = 100
+    hist[200] = 100
+    points = list(equalize_curve(hist))
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    assert xs[0] == 0 and xs[-1] == 255
+    assert all(xs[i + 1] > xs[i] for i in range(len(xs) - 1))
+    assert ys[0] == 0 and ys[-1] == 255
+    # Between the spikes the CDF plateaus at 0.5 -> y == 128.
+    assert all(y == 128 for x, y in points if 64 <= x <= 191)
+
+
+def test_equalize_curve_flat_histogram_is_near_identity() -> None:
+    points = equalize_curve([100] * 256)
+    assert all(abs(y - x) <= 2 for x, y in points)
+
+
+def test_equalize_curve_empty_histogram_is_identity() -> None:
+    assert equalize_curve([0] * 256) == IDENTITY_CURVE
+
+
+def test_equalize_curve_feeds_curve_lut() -> None:
+    hist = [0] * 256
+    hist[50] = 100
+    hist[200] = 100
+    lut = curve_lut(equalize_curve(hist))
+    assert len(lut) == 256 and all(0 <= v <= 255 for v in lut)

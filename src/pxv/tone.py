@@ -165,3 +165,24 @@ def curve_lut(points: CurvePoints) -> list[int]:
             )
         lut.append(max(0, min(255, int(y + 0.5))))
     return lut
+
+
+def equalize_curve(hist_lum: list[int], n_points: int = 9) -> CurvePoints:
+    """Histogram-equalization master curve: the CDF sampled at even inputs.
+
+    Returns ordinary, editable control points — equalization stays
+    non-destructive and tweakable (beyond xv). Empty histogram -> identity.
+    """
+    total = sum(hist_lum)
+    if total == 0:
+        return IDENTITY_CURVE
+    cdf: list[float] = []
+    acc = 0
+    for count in hist_lum:
+        acc += count
+        cdf.append(acc / total)
+    points: list[tuple[int, int]] = []
+    for k in range(n_points):
+        x = round(k * 255 / (n_points - 1))
+        points.append((x, round(255 * cdf[x])))
+    return tuple(points)
