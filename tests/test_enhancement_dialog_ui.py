@@ -7,6 +7,7 @@ Run under Xvfb: `Xvfb :99 &` then `DISPLAY=:99 uv run pytest <this file>`.
 from __future__ import annotations
 
 import os
+import types
 
 import pytest
 from PIL import Image
@@ -56,5 +57,60 @@ def test_histogram_panel_toggles_reach_renderer(monkeypatch: pytest.MonkeyPatch)
         panel._redraw()
         assert calls[0] == ({"lum"}, False)
         assert calls[-1] == ({"lum", "r"}, True)
+    finally:
+        root.destroy()
+
+
+def _make_app() -> tuple[types.SimpleNamespace, "tk.Tk"]:
+    """Lightweight PxvApp double around real Tk widgets (see test_dialog_focus)."""
+    from pxv.app import PxvApp
+    from pxv.canvas_view import CanvasView
+    from pxv.enhancements import EnhancementParams
+
+    root = tk.Tk()
+    canvas_view = CanvasView(root)
+    root.update_idletasks()
+    app = types.SimpleNamespace(
+        root=root,
+        canvas_view=canvas_view,
+        info_dialog=None,
+        enhancement_dialog=None,
+        enhancement_params=EnhancementParams(),
+        image_model=types.SimpleNamespace(keep_metadata=False, metadata=None),
+        refresh_calls=[],
+    )
+    app.refresh_display = lambda: app.refresh_calls.append(True)
+    app.restore_main_focus = types.MethodType(PxvApp.restore_main_focus, app)
+    return app, root
+
+
+def test_dialog_has_histogram_panel_and_sliders_tab() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        tabs = [dlg._notebook.tab(tab_id, "text") for tab_id in dlg._notebook.tabs()]
+        assert tabs == ["Sliders"]
+        # Sliders still build and sync inside the tab.
+        app.enhancement_params.brightness = 1.5
+        dlg.sync_sliders_from_params()
+        assert dlg._slider_vars["brightness"].get() == 1.5
+        dlg._on_close()
+    finally:
+        root.destroy()
+
+
+def test_dialog_update_histogram_delegates_to_panel() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        dlg.update_histogram(Image.new("RGB", (8, 8), (0, 255, 0)))
+        assert dlg.histogram_panel._photo is not None
+        dlg.update_histogram(None)
+        assert dlg.histogram_panel._photo is None
+        dlg._on_close()
     finally:
         root.destroy()

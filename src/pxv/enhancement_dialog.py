@@ -13,8 +13,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from pxv.enhancements import COLOR_SLIDER_SPECS, SLIDER_SPECS
+from pxv.histogram_panel import HistogramPanel
 
 if TYPE_CHECKING:
+    from PIL import Image
+
     from pxv.app import PxvApp
 
 
@@ -51,19 +54,28 @@ class EnhancementDialog(tk.Toplevel):
         main_frame = ttk.Frame(self, padding=8)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Core adjustments section
-        core_frame = ttk.LabelFrame(main_frame, text="Core Adjustments", padding=6)
+        # Histogram stays visible above whichever tab is active.
+        self.histogram_panel = HistogramPanel(main_frame)
+        self.histogram_panel.pack(fill=tk.X, pady=(0, 6))
+
+        # AIDEV-NOTE: Tabbed layout per the 2026-06-10 histogram/levels/curves
+        # design — Sliders today; Levels and Curves tabs arrive in later phases.
+        self._notebook = ttk.Notebook(main_frame)
+        self._notebook.pack(fill=tk.BOTH, expand=True)
+
+        sliders_tab = ttk.Frame(self._notebook, padding=6)
+        self._notebook.add(sliders_tab, text="Sliders")
+
+        core_frame = ttk.LabelFrame(sliders_tab, text="Core Adjustments", padding=6)
         core_frame.pack(fill=tk.X, pady=(0, 6))
         self._add_sliders(core_frame, SLIDER_SPECS)
 
-        # Color section
-        color_frame = ttk.LabelFrame(main_frame, text="Color", padding=6)
-        color_frame.pack(fill=tk.X, pady=(0, 6))
+        color_frame = ttk.LabelFrame(sliders_tab, text="Color", padding=6)
+        color_frame.pack(fill=tk.X)
         self._add_sliders(color_frame, COLOR_SLIDER_SPECS)
 
-        # Buttons
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=(4, 0))
+        btn_frame.pack(fill=tk.X, pady=(6, 0))
         ttk.Button(btn_frame, text="Apply", command=self._on_apply, width=8).pack(
             side=tk.LEFT, padx=4
         )
@@ -182,3 +194,7 @@ class EnhancementDialog(tk.Toplevel):
             val = getattr(params, attr)
             var.set(val)
         self._updating_sliders = False
+
+    def update_histogram(self, img: Image.Image | None) -> None:
+        """Feed the latest preview image to the histogram panel (None blanks it)."""
+        self.histogram_panel.update_from_image(img)
