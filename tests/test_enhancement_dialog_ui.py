@@ -125,6 +125,7 @@ def test_cmd_enhancement_dialog_seeds_histogram_via_refresh() -> None:
 
     app, root = _make_app()
     try:
+        app.refresh_display = lambda: app.refresh_calls.append(app.enhancement_dialog is not None)
         commands.cmd_enhancement_dialog(app)
         assert app.enhancement_dialog is not None
         assert app.refresh_calls == [True]

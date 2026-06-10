@@ -146,6 +146,14 @@ def test_update_display_feeds_open_dialog() -> None:
     assert received == [img]
 
 
+def test_update_display_feeds_none_when_no_image() -> None:
+    from pxv.app import PxvApp
+
+    app, received = _refresh_double(None)
+    PxvApp._update_display(app)
+    assert received == [None]
+
+
 def test_refresh_display_with_no_dialog_does_not_crash() -> None:
     from pxv.app import PxvApp
 
