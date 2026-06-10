@@ -264,11 +264,12 @@ class CanvasView:
         # gaining focus anyway, so cooperative focus_set suffices here.
         self.canvas.focus_set()
         # AIDEV-NOTE: Pick mode consumes this click entirely — no rubber band,
-        # one shot, then auto-disarm (cursor restored) before delivering.
+        # one shot, then auto-disarm (cursor restored) before delivering,
+        # coords via _canvas_xy so picks stay correct on a scrolled view.
         if self._pick_callback is not None and self._pick_working_size is not None:
             callback = self._pick_callback
             coords = canvas_point_to_image_xy(
-                (int(getattr(event, "x", 0)), int(getattr(event, "y", 0))),
+                self._canvas_xy(event),
                 self._pick_working_size,
                 (self._display_width, self._display_height),
                 (self.canvas.winfo_width(), self.canvas.winfo_height()),
