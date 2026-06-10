@@ -12,6 +12,7 @@ from pxv.tone import (
     curve_lut,
     equalize_curve,
     gamma_to_mid,
+    gray_balance_gammas,
     levels_lut,
     mid_to_gamma,
 )
@@ -194,3 +195,23 @@ def test_equalize_curve_feeds_curve_lut() -> None:
     hist[200] = 100
     lut = curve_lut(equalize_curve(hist))
     assert len(lut) == 256 and all(0 <= v <= 255 for v in lut)
+
+
+def test_gray_balance_neutral_sample_is_identity() -> None:
+    assert gray_balance_gammas((128, 128, 128)) == (1.0, 1.0, 1.0)
+
+
+def test_gray_balance_neutralizes_a_cast() -> None:
+    sample = (200, 128, 100)
+    gr, gg, gb = gray_balance_gammas(sample)
+    assert gr < 1.0 < gb  # red too bright -> darken; blue too dark -> brighten
+    # Applying the per-channel gammas maps each sampled channel near the mean.
+    outs = [levels_lut(LevelsChannel(gamma=g))[v] for g, v in ((gr, 200), (gg, 128), (gb, 100))]
+    assert max(outs) - min(outs) <= 3
+
+
+def test_gray_balance_extreme_channels_fall_back_to_identity() -> None:
+    # Channels at 0 or 255 (or an extreme mean) can't be gamma-balanced.
+    gr, _gg, gb = gray_balance_gammas((0, 128, 255))
+    assert gr == 1.0 and gb == 1.0
+    assert gray_balance_gammas((255, 255, 255)) == (1.0, 1.0, 1.0)

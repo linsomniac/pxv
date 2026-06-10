@@ -52,6 +52,31 @@ def selection_to_image_box(
     return (ix1, iy1, ix2, iy2)
 
 
+def canvas_point_to_image_xy(
+    point: tuple[int, int],
+    working_size: tuple[int, int],
+    display_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+    zoom: float,
+) -> tuple[int, int] | None:
+    """Map one canvas-space point to working-image pixel coords, or None if outside.
+
+    AIDEV-NOTE: Single-point analog of selection_to_image_box — same centering
+    offset and zoom math, kept pure for headless testing.
+    """
+    x, y = point
+    img_w, img_h = working_size
+    disp_w, disp_h = display_size
+    canvas_w, canvas_h = canvas_size
+    area_w = max(canvas_w, disp_w)
+    area_h = max(canvas_h, disp_h)
+    ix = int((x - (area_w - disp_w) / 2) / zoom)
+    iy = int((y - (area_h - disp_h) / 2) / zoom)
+    if ix < 0 or iy < 0 or ix >= img_w or iy >= img_h:
+        return None
+    return (ix, iy)
+
+
 class CanvasView:
     """Canvas widget that displays an image with rubber-band selection and zoom."""
 

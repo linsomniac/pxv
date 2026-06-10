@@ -167,6 +167,26 @@ def curve_lut(points: CurvePoints) -> list[int]:
     return lut
 
 
+def gray_balance_gammas(sample: tuple[int, int, int]) -> tuple[float, float, float]:
+    """Per-channel gammas that map a sampled near-gray pixel to neutral.
+
+    Target is the sample mean. From levels_lut, output (v/255)**(1/gamma)
+    equals m/255 when gamma = log(v/255) / log(m/255). Channels at 0/255 (or
+    an extreme mean) cannot be gamma-balanced and fall back to 1.0.
+    """
+    m = sum(sample) / 3.0
+    if m <= 0.0 or m >= 255.0:
+        return (1.0, 1.0, 1.0)
+    gammas: list[float] = []
+    for v in sample:
+        if v <= 0 or v >= 255:
+            gammas.append(1.0)
+        else:
+            g = math.log(v / 255.0) / math.log(m / 255.0)
+            gammas.append(min(10.0, max(0.1, round(g, 2))))
+    return (gammas[0], gammas[1], gammas[2])
+
+
 def equalize_curve(hist_lum: list[int], n_points: int = 9) -> CurvePoints:
     """Histogram-equalization master curve: the CDF sampled at even inputs.
 
