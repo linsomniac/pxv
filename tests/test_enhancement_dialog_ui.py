@@ -298,6 +298,47 @@ def test_dialog_levels_edit_schedules_debounced_refresh() -> None:
         root.destroy()
 
 
+def test_update_histogram_resyncs_levels_strip_on_image_change() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        dlg._input_histograms()  # populate the cache for the current image
+        strip_before = dlg.levels_tab._hist_photo
+        # Geometry op replaces working_image, then refresh feeds the dialog:
+        app.image_model.working_image = Image.new("RGB", (8, 8), (5, 5, 5))
+        dlg.update_histogram(Image.new("RGB", (8, 8), (5, 5, 5)))
+        assert dlg.levels_tab._hist_photo is not strip_before  # strip re-rendered
+        # And a feed with an UNCHANGED working image must not re-render the strip:
+        strip_after = dlg.levels_tab._hist_photo
+        dlg.update_histogram(Image.new("RGB", (8, 8), (5, 5, 5)))
+        assert dlg.levels_tab._hist_photo is strip_after
+        dlg._on_close()
+    finally:
+        root.destroy()
+
+
+def test_tab_changed_to_levels_resyncs_strip() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        dlg._notebook.select(dlg.levels_tab)
+        root.update()  # deliver <<NotebookTabChanged>>
+        strip_before = dlg.levels_tab._hist_photo
+        app.image_model.working_image = Image.new("RGB", (8, 8), (250, 1, 1))
+        dlg._notebook.select(0)  # to Sliders
+        root.update()
+        dlg._notebook.select(dlg.levels_tab)  # back to Levels
+        root.update()
+        assert dlg.levels_tab._hist_photo is not strip_before
+        dlg._on_close()
+    finally:
+        root.destroy()
+
+
 def test_dialog_input_histogram_cache_keyed_on_working_image() -> None:
     from pxv.enhancement_dialog import EnhancementDialog
 

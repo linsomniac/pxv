@@ -216,6 +216,14 @@ class EnhancementDialog(tk.Toplevel):
     def update_histogram(self, img: Image.Image | None) -> None:
         """Feed the latest preview image to the histogram panel (None blanks it)."""
         self.histogram_panel.update_from_image(img)
+        # AIDEV-NOTE: Geometry ops (crop/rotate/flip/resize) replace
+        # working_image and refresh the display while the Levels tab may be
+        # frontmost — resync its strip, but only when the input image actually
+        # changed, so marker-drag refreshes don't redraw the strip every 30ms.
+        cached = self._input_hist_cache
+        current = self.app.image_model.working_image
+        if current is not None and (cached is None or cached[0] is not current):
+            self.levels_tab.sync_from_params()
 
     _LEVELS_ATTRS = {
         "master": "levels_master",
