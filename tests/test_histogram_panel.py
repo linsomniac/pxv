@@ -91,5 +91,6 @@ def test_render_histogram_spike_lands_at_its_column() -> None:
     lum[128] = 1000
     out = render_histogram(lum, [0] * 768, {"lum"}, log_scale=False)
     bg = out.getpixel((20, 50))
+    assert bg == (24, 24, 24)
     spike = out.getpixel((128, 50))
     assert spike != bg

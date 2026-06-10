@@ -34,17 +34,27 @@ def test_histogram_panel_update_and_blank() -> None:
         root.destroy()
 
 
-def test_histogram_panel_toggle_rerenders_without_new_image() -> None:
-    from pxv.histogram_panel import HistogramPanel
+def test_histogram_panel_toggles_reach_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pxv.histogram_panel as hp
 
+    calls: list[tuple[set[str], bool]] = []
+    real_render = hp.render_histogram
+
+    def recording_render(
+        lum: list[int], rgb: list[int], channels: set[str], log_scale: bool
+    ) -> "Image.Image":
+        calls.append((channels, log_scale))
+        return real_render(lum, rgb, channels, log_scale)
+
+    monkeypatch.setattr(hp, "render_histogram", recording_render)
     root = tk.Tk()
     try:
-        panel = HistogramPanel(root)
+        panel = hp.HistogramPanel(root)
         panel.update_from_image(Image.new("RGB", (16, 16), (255, 0, 0)))
-        first = panel._photo
         panel._channel_vars["r"].set(True)
+        panel._log_var.set(True)
         panel._redraw()
-        assert panel._photo is not None
-        assert panel._photo is not first
+        assert calls[0] == ({"lum"}, False)
+        assert calls[-1] == ({"lum", "r"}, True)
     finally:
         root.destroy()
