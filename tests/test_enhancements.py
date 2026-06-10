@@ -10,7 +10,7 @@ from pxv.enhancements import (
     _build_lut,
     apply_enhancements,
 )
-from pxv.tone import LevelsChannel
+from pxv.tone import IDENTITY_CURVE, LevelsChannel
 
 
 def test_is_identity_default() -> None:
@@ -133,3 +133,45 @@ def test_apply_enhancements_master_before_channel_levels() -> None:
     px = out.getpixel((0, 0))
     assert px[0] == 0
     assert px[1] == 50 and px[2] == 50  # master only on G/B
+
+
+def test_params_identity_covers_curves() -> None:
+    p = EnhancementParams()
+    assert p.is_identity()
+    p.curve_g = ((0, 0), (128, 200), (255, 255))
+    assert not p.is_identity()
+    p.reset()
+    assert p.is_identity()
+    assert p.curve_g == IDENTITY_CURVE
+
+
+def test_apply_enhancements_master_curve_inverts() -> None:
+    img = Image.new("RGB", (2, 2), (10, 100, 200))
+    p = EnhancementParams()
+    p.curve_master = ((0, 255), (255, 0))
+    out = apply_enhancements(img, p)
+    assert out.getpixel((0, 0)) == (245, 155, 55)
+
+
+def test_apply_enhancements_levels_before_curves() -> None:
+    # Levels map 128 -> 50 (out_white=100); the master curve's flat-200 floor
+    # then lifts everything to 200. Reversed order would curve first
+    # (128 stays under the flat) then compress 200 -> 78. Pins the spec order:
+    # levels before curves.
+    img = Image.new("RGB", (1, 1), (128, 128, 128))
+    p = EnhancementParams()
+    p.levels_master = LevelsChannel(out_white=100)
+    p.curve_master = ((0, 200), (255, 255))
+    out = apply_enhancements(img, p)
+    assert out.getpixel((0, 0))[0] >= 200
+
+
+def test_apply_enhancements_lut_resolution_independent() -> None:
+    # The whole tone stack is per-pixel: the same color must map identically
+    # at any image size (this is why preview == save for LUT-only params).
+    p = EnhancementParams()
+    p.levels_master = LevelsChannel(in_black=20, gamma=1.7)
+    p.curve_r = ((0, 0), (100, 180), (255, 255))
+    small = apply_enhancements(Image.new("RGB", (2, 2), (90, 140, 30)), p)
+    large = apply_enhancements(Image.new("RGB", (64, 64), (90, 140, 30)), p)
+    assert small.getpixel((0, 0)) == large.getpixel((32, 32))

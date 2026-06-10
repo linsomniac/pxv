@@ -1,7 +1,7 @@
 """Enhancement parameters and the image enhancement pipeline.
 
 AIDEV-NOTE: The apply_enhancements pipeline order matters:
-  Contrast -> Saturation -> Hue rotation -> Combined LUT (brightness+gamma+RGB+levels) -> Blur -> Sharpen
+  Contrast -> Saturation -> Hue rotation -> Combined LUT (brightness+gamma+RGB+levels+curves) -> Blur -> Sharpen
 The combined LUT merges brightness, gamma, per-channel color balance, and levels into a single
 Image.point() call with a 768-entry lookup table for performance.
 """
@@ -12,7 +12,14 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageEnhance, ImageFilter
 
-from pxv.tone import LevelsChannel, compose_luts, levels_lut
+from pxv.tone import (
+    IDENTITY_CURVE,
+    CurvePoints,
+    LevelsChannel,
+    compose_luts,
+    curve_lut,
+    levels_lut,
+)
 
 
 @dataclass
@@ -33,6 +40,10 @@ class EnhancementParams:
     levels_r: LevelsChannel = LevelsChannel()
     levels_g: LevelsChannel = LevelsChannel()
     levels_b: LevelsChannel = LevelsChannel()
+    curve_master: CurvePoints = IDENTITY_CURVE
+    curve_r: CurvePoints = IDENTITY_CURVE
+    curve_g: CurvePoints = IDENTITY_CURVE
+    curve_b: CurvePoints = IDENTITY_CURVE
 
     def is_identity(self) -> bool:
         """Return True if all parameters are at their default (no-op) values."""
@@ -51,6 +62,10 @@ class EnhancementParams:
             and self.levels_r.is_identity()
             and self.levels_g.is_identity()
             and self.levels_b.is_identity()
+            and self.curve_master == IDENTITY_CURVE
+            and self.curve_r == IDENTITY_CURVE
+            and self.curve_g == IDENTITY_CURVE
+            and self.curve_b == IDENTITY_CURVE
         )
 
     def reset(self) -> None:
@@ -69,6 +84,10 @@ class EnhancementParams:
         self.levels_r = LevelsChannel()
         self.levels_g = LevelsChannel()
         self.levels_b = LevelsChannel()
+        self.curve_master = IDENTITY_CURVE
+        self.curve_r = IDENTITY_CURVE
+        self.curve_g = IDENTITY_CURVE
+        self.curve_b = IDENTITY_CURVE
 
 
 # AIDEV-NOTE: Slider metadata used by the enhancement dialog to build sliders.
@@ -152,12 +171,18 @@ def apply_enhancements(
     if params.hue_offset != 0:
         result = _apply_hue_rotation(result, params.hue_offset)
 
-    # 4. Combined LUT pass (brightness + gamma + RGB balance + levels)
+    # 4. Combined LUT pass (brightness + gamma + RGB balance + levels + curves)
     levels_active = not (
         params.levels_master.is_identity()
         and params.levels_r.is_identity()
         and params.levels_g.is_identity()
         and params.levels_b.is_identity()
+    )
+    curves_active = not (
+        params.curve_master == IDENTITY_CURVE
+        and params.curve_r == IDENTITY_CURVE
+        and params.curve_g == IDENTITY_CURVE
+        and params.curve_b == IDENTITY_CURVE
     )
     needs_lut = (
         params.brightness != 1.0
@@ -166,19 +191,34 @@ def apply_enhancements(
         or params.g_balance != 1.0
         or params.b_balance != 1.0
         or levels_active
+        or curves_active
     )
     if needs_lut:
         base = _build_lut(
             params.brightness, params.gamma, params.r_balance, params.g_balance, params.b_balance
         )
-        if levels_active:
+        if levels_active or curves_active:
             # AIDEV-NOTE: Fixed composition order per the 2026-06-10 design:
             # base (brightness+gamma+balance) -> master levels -> channel
-            # levels. Curves will append here in Phase 3.
-            master = levels_lut(params.levels_master)
+            # levels -> master curve -> channel curve.
+            master_lv = levels_lut(params.levels_master)
+            master_cv = curve_lut(params.curve_master)
             lut: list[int] = []
-            for idx, ch in enumerate((params.levels_r, params.levels_g, params.levels_b)):
-                lut.extend(compose_luts(base[idx * 256 : (idx + 1) * 256], master, levels_lut(ch)))
+            channel_tone = (
+                (params.levels_r, params.curve_r),
+                (params.levels_g, params.curve_g),
+                (params.levels_b, params.curve_b),
+            )
+            for idx, (ch_lv, ch_cv) in enumerate(channel_tone):
+                lut.extend(
+                    compose_luts(
+                        base[idx * 256 : (idx + 1) * 256],
+                        master_lv,
+                        levels_lut(ch_lv),
+                        master_cv,
+                        curve_lut(ch_cv),
+                    )
+                )
         else:
             lut = base
         result = result.point(lut)
