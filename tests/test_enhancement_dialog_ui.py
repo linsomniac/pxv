@@ -226,3 +226,28 @@ def test_levels_tab_auto_sets_per_channel() -> None:
         assert store["master"].is_identity()  # Auto never touches master
     finally:
         root.destroy()
+
+
+def test_levels_tab_gamma_marker_drag_roundtrips() -> None:
+    root = tk.Tk()
+    try:
+        tab, store, _changes = _make_levels_tab(root)
+        tab._on_in_press(types.SimpleNamespace(x=127))  # nearest = mid marker
+        tab._on_in_drag(types.SimpleNamespace(x=64))  # t=0.25 -> gamma ~2
+        tab._on_release(types.SimpleNamespace())
+        assert 1.9 <= store["master"].gamma <= 2.1
+        assert tab._spins["gamma"].get() == f"{store['master'].gamma:.2f}"
+    finally:
+        root.destroy()
+
+
+def test_levels_tab_output_markers_cannot_cross_by_drag() -> None:
+    root = tk.Tk()
+    try:
+        tab, store, _changes = _make_levels_tab(root)
+        tab._on_out_press(types.SimpleNamespace(x=2))  # nearest = out_black
+        tab._on_out_drag(types.SimpleNamespace(x=240))
+        tab._on_release(types.SimpleNamespace())
+        assert store["master"].out_black <= store["master"].out_white
+    finally:
+        root.destroy()
