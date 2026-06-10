@@ -99,3 +99,28 @@ def test_gamma_mid_roundtrip() -> None:
 def test_mid_to_gamma_clamps_at_extremes() -> None:
     assert mid_to_gamma(0, 255, 0.0) == 10.0  # far left -> max gamma
     assert mid_to_gamma(0, 255, 255.0) == 0.1  # far right -> min gamma
+
+
+def test_auto_levels_skips_hot_pixels_via_accumulation() -> None:
+    # 3 hot pixels at 255 are under the 0.5% clip budget and must be skipped;
+    # a regression replacing the accumulation with "first nonzero bin" fails here.
+    hist = [0] * 768
+    for c in range(3):
+        hist[c * 256 + 50] = 10000
+        hist[c * 256 + 150] = 10000
+        hist[c * 256 + 255] = 3
+    r, g, b = auto_levels(hist, clip_percent=0.5)
+    for ch in (r, g, b):
+        assert ch.in_black == 50
+        assert ch.in_white == 150
+
+
+def test_levels_lut_monotonic_for_normal_params() -> None:
+    for ch in (
+        LevelsChannel(),
+        LevelsChannel(in_black=30, in_white=200),
+        LevelsChannel(gamma=0.4),
+        LevelsChannel(gamma=2.5, in_black=10, in_white=240, out_black=20, out_white=235),
+    ):
+        lut = levels_lut(ch)
+        assert all(lut[i + 1] >= lut[i] for i in range(255)), ch
