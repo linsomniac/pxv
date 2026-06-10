@@ -156,7 +156,7 @@ def test_apply_enhancements_master_curve_inverts() -> None:
 def test_apply_enhancements_levels_before_curves() -> None:
     # Levels map 128 -> 50 (out_white=100); the master curve's flat-200 floor
     # then lifts everything to 200. Reversed order would curve first
-    # (128 stays under the flat) then compress 200 -> 78. Pins the spec order:
+    # (128 stays under the flat) then compress 200 -> ~89. Pins the spec order:
     # levels before curves.
     img = Image.new("RGB", (1, 1), (128, 128, 128))
     p = EnhancementParams()
@@ -175,3 +175,11 @@ def test_apply_enhancements_lut_resolution_independent() -> None:
     small = apply_enhancements(Image.new("RGB", (2, 2), (90, 140, 30)), p)
     large = apply_enhancements(Image.new("RGB", (64, 64), (90, 140, 30)), p)
     assert small.getpixel((0, 0)) == large.getpixel((32, 32))
+
+
+def test_apply_enhancements_per_channel_curve() -> None:
+    # Mutation guard: dropping curve_lut(ch_cv) from the composition must fail here.
+    p = EnhancementParams()
+    p.curve_r = ((0, 255), (255, 0))
+    out = apply_enhancements(Image.new("RGB", (1, 1), (10, 100, 200)), p)
+    assert out.getpixel((0, 0)) == (245, 100, 200)  # only R inverted
