@@ -107,6 +107,10 @@ class PxvApp:
         # AIDEV-NOTE: Toggles transparent-area compositing between white and black.
         # Only affects display; saving always uses the true alpha channel.
         self.dark_background: bool = False
+        # AIDEV-NOTE: Set True while the Compare button is held in the enhancement
+        # dialog; _active_params() returns identity params so the display renders
+        # the original (pre-enhancement) image. Cleared on dialog close.
+        self._compare_active: bool = False
 
         # AIDEV-NOTE: Presentation modes. In fullscreen the window stays screen-sized
         # (refresh_display skips the resize-to-image) and the image is fit to the
@@ -359,11 +363,19 @@ class PxvApp:
         self.canvas_view.clear_selection()
         self.refresh_display()
 
+    def _active_params(self) -> EnhancementParams:
+        """Identity params while Compare is held in the dialog, else the live ones.
+
+        AIDEV-NOTE: Read at refresh time, so an in-flight debounce timer firing
+        during a Compare hold still renders the compare (original) state.
+        """
+        return EnhancementParams() if self._compare_active else self.enhancement_params
+
     def refresh_display(self) -> None:
         """Re-render the image with current zoom and enhancement params."""
         display_img = self.image_model.get_display_image(
             zoom=self.canvas_view.zoom,
-            params=self.enhancement_params,
+            params=self._active_params(),
             bg_color=self._bg_color(),
         )
         if display_img is not None:
@@ -394,7 +406,7 @@ class PxvApp:
         """Refresh display without changing zoom or window size (for resize events)."""
         display_img = self.image_model.get_display_image(
             zoom=self.canvas_view.zoom,
-            params=self.enhancement_params,
+            params=self._active_params(),
             bg_color=self._bg_color(),
         )
         if display_img is not None:

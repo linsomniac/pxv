@@ -86,6 +86,7 @@ def _make_app() -> tuple[types.SimpleNamespace, "tk.Tk"]:
             working_image=Image.new("RGB", (8, 8), (120, 90, 200)),
         ),
         refresh_calls=[],
+        _compare_active=False,
     )
     app.refresh_display = lambda: app.refresh_calls.append(True)
     app.restore_main_focus = types.MethodType(PxvApp.restore_main_focus, app)
@@ -676,5 +677,24 @@ def test_pick_after_image_replacement_delivers_none() -> None:
         cb((2, 3))
         assert samples == [None]
         dlg._on_close()
+    finally:
+        root.destroy()
+
+
+def test_dialog_compare_press_and_release_toggle_flag() -> None:
+    from pxv.enhancement_dialog import EnhancementDialog
+
+    app, root = _make_app()
+    try:
+        dlg = EnhancementDialog(app)
+        dlg._on_compare_press(types.SimpleNamespace())
+        assert app._compare_active is True
+        assert app.refresh_calls  # re-rendered to show the original
+        dlg._on_compare_release(types.SimpleNamespace())
+        assert app._compare_active is False
+        # Close while held must never leave the flag stuck:
+        dlg._on_compare_press(types.SimpleNamespace())
+        dlg._on_close()
+        assert app._compare_active is False
     finally:
         root.destroy()

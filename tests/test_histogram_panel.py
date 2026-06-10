@@ -105,9 +105,13 @@ def _refresh_double(
     from pxv.enhancements import EnhancementParams
 
     received: list[Image.Image | None] = []
+    received_params: list[object] = []
     app = types.SimpleNamespace(
         image_model=types.SimpleNamespace(
-            get_display_image=lambda zoom, params, bg_color: display_img,
+            get_display_image=lambda zoom, params, bg_color: (
+                received_params.append(params),
+                display_img,
+            )[1],
             current_path=None,
         ),
         canvas_view=types.SimpleNamespace(zoom=1.0, display=lambda im: None),
@@ -116,7 +120,12 @@ def _refresh_double(
         enhancement_dialog=types.SimpleNamespace(update_histogram=received.append),
         _bg_color=lambda: (0, 0, 0),
         _update_title=lambda: None,
+        _compare_active=False,
     )
+    from pxv.app import PxvApp
+
+    app._active_params = types.MethodType(PxvApp._active_params, app)
+    app.received_params = received_params
     return app, received
 
 
@@ -160,3 +169,24 @@ def test_refresh_display_with_no_dialog_does_not_crash() -> None:
     app, _received = _refresh_double(None)
     app.enhancement_dialog = None
     PxvApp.refresh_display(app)  # must not raise
+
+
+def test_refresh_display_uses_live_params_normally() -> None:
+    from pxv.app import PxvApp
+
+    app, _received = _refresh_double(None)
+    PxvApp.refresh_display(app)
+    assert app.received_params == [app.enhancement_params]
+
+
+def test_refresh_display_substitutes_identity_during_compare() -> None:
+    from pxv.app import PxvApp
+    from pxv.tone import LevelsChannel
+
+    app, _received = _refresh_double(None)
+    app.enhancement_params.levels_master = LevelsChannel(in_black=40)
+    app._compare_active = True
+    PxvApp.refresh_display(app)
+    assert len(app.received_params) == 1
+    assert app.received_params[0] is not app.enhancement_params
+    assert app.received_params[0].is_identity()

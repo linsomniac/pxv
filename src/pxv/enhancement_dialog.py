@@ -108,6 +108,11 @@ class EnhancementDialog(tk.Toplevel):
         ttk.Button(btn_frame, text="Reset", command=self._on_reset, width=8).pack(
             side=tk.LEFT, padx=4
         )
+        compare_btn = ttk.Button(btn_frame, text="Compare", width=8)
+        compare_btn.pack(side=tk.LEFT, padx=4)
+        # Hold-to-compare: press shows the unenhanced image, release restores.
+        compare_btn.bind("<ButtonPress-1>", self._on_compare_press)
+        compare_btn.bind("<ButtonRelease-1>", self._on_compare_release)
         ttk.Button(btn_frame, text="Close", command=self._on_close, width=8).pack(
             side=tk.LEFT, padx=4
         )
@@ -197,6 +202,14 @@ class EnhancementDialog(tk.Toplevel):
         self.sync_sliders_from_params()
         self.app.refresh_display()
 
+    def _on_compare_press(self, _event: object) -> None:
+        self.app._compare_active = True
+        self.app.refresh_display()
+
+    def _on_compare_release(self, _event: object) -> None:
+        self.app._compare_active = False
+        self.app.refresh_display()
+
     def _on_close(self) -> None:
         # AIDEV-NOTE: Cancel any in-flight debounce timer before teardown so it
         # can't fire a stray refresh after the dialog is gone.
@@ -207,6 +220,7 @@ class EnhancementDialog(tk.Toplevel):
         # class as the debounce timer above; the canvas must not deliver into a
         # destroyed dialog.
         self.app.canvas_view.set_pick_callback(None, None)
+        self.app._compare_active = False
         self.app.enhancement_dialog = None
         self.destroy()
         # AIDEV-NOTE: Reclaim keyboard focus for the main window AFTER teardown —
