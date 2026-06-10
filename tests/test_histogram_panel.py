@@ -64,7 +64,7 @@ def test_render_histogram_channels_differ() -> None:
     lum, rgb = compute_histograms(img)
     r_only = render_histogram(lum, rgb, {"r"}, log_scale=False)
     b_only = render_histogram(lum, rgb, {"b"}, log_scale=False)
-    assert list(r_only.getdata()) != list(b_only.getdata())
+    assert r_only.tobytes() != b_only.tobytes()
 
 
 def test_render_histogram_log_scale_runs() -> None:
@@ -83,3 +83,13 @@ def test_render_histogram_all_zero_bins() -> None:
 def test_render_histogram_no_channels_selected() -> None:
     out = render_histogram([1] * 256, [1] * 768, set(), log_scale=False)
     assert out.size == HIST_SIZE
+
+
+def test_render_histogram_spike_lands_at_its_column() -> None:
+    # A single spike at bin 128 must paint column 128 tall and leave col 20 empty.
+    lum = [0] * 256
+    lum[128] = 1000
+    out = render_histogram(lum, [0] * 768, {"lum"}, log_scale=False)
+    bg = out.getpixel((20, 50))
+    spike = out.getpixel((128, 50))
+    assert spike != bg
