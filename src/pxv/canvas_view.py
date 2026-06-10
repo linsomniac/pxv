@@ -10,6 +10,7 @@ space for crop operations, accounting for the centering offset and zoom factor.
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PIL import ImageTk
@@ -106,6 +107,10 @@ class CanvasView:
         # Debounce for configure events
         self._configure_after_id: str | None = None
         self._on_right_click = on_right_click
+
+        # One-shot eyedropper pick mode (None = normal rubber-band behavior).
+        self._pick_callback: Callable[[tuple[int, int] | None], None] | None = None
+        self._pick_working_size: tuple[int, int] | None = None
 
         self._bind_mouse()
 
@@ -204,6 +209,17 @@ class CanvasView:
             self.zoom,
         )
 
+    def set_pick_callback(
+        self,
+        callback: Callable[[tuple[int, int] | None], None] | None,
+        working_size: tuple[int, int] | None,
+    ) -> None:
+        """Arm (or disarm with None) a one-shot pick: the next click is consumed
+        and the callback receives working-image coords, or None for a miss."""
+        self._pick_callback = callback
+        self._pick_working_size = working_size
+        self.canvas.config(cursor="tcross" if callback is not None else "crosshair")
+
     def zoom_normal(self) -> None:
         self.zoom = 1.0
 
@@ -247,6 +263,20 @@ class CanvasView:
         # PxvApp.restore_main_focus). A real click means the main window is
         # gaining focus anyway, so cooperative focus_set suffices here.
         self.canvas.focus_set()
+        # AIDEV-NOTE: Pick mode consumes this click entirely — no rubber band,
+        # one shot, then auto-disarm (cursor restored) before delivering.
+        if self._pick_callback is not None and self._pick_working_size is not None:
+            callback = self._pick_callback
+            coords = canvas_point_to_image_xy(
+                (int(getattr(event, "x", 0)), int(getattr(event, "y", 0))),
+                self._pick_working_size,
+                (self._display_width, self._display_height),
+                (self.canvas.winfo_width(), self.canvas.winfo_height()),
+                self.zoom,
+            )
+            self.set_pick_callback(None, None)
+            callback(coords)
+            return
         self.clear_selection()
         self._rb_start = self._canvas_xy(event)
 

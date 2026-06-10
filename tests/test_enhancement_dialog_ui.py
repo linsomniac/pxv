@@ -498,3 +498,48 @@ def test_curve_editor_external_resync_cancels_drag() -> None:
         assert store["master"] == ((0, 0), (255, 255))
     finally:
         root.destroy()
+
+
+def test_canvas_pick_mode_consumes_click_and_disarms() -> None:
+    from pxv.canvas_view import CanvasView
+
+    root = tk.Tk()
+    try:
+        view = CanvasView(root)
+        view.canvas.config(width=300, height=300)
+        root.update()  # full update: an unmapped canvas reports winfo_width()==1
+        view._display_width = 100
+        view._display_height = 100
+        view.zoom = 1.0
+        picks: list[tuple[int, int] | None] = []
+        view.set_pick_callback(picks.append, (100, 100))
+        assert "tcross" in view.canvas.cget("cursor")
+        view._on_press(types.SimpleNamespace(x=150, y=150))
+        assert picks == [(50, 50)]
+        assert view._rb_start is None  # no rubber band started
+        assert view._pick_callback is None  # one-shot: disarmed
+        assert view.canvas.cget("cursor") == "crosshair"
+        # Next click is a normal rubber-band press again.
+        view._on_press(types.SimpleNamespace(x=10, y=10))
+        assert view._rb_start is not None
+    finally:
+        root.destroy()
+
+
+def test_canvas_pick_outside_image_delivers_none() -> None:
+    from pxv.canvas_view import CanvasView
+
+    root = tk.Tk()
+    try:
+        view = CanvasView(root)
+        view.canvas.config(width=300, height=300)
+        root.update()  # full update: an unmapped canvas reports winfo_width()==1
+        view._display_width = 100
+        view._display_height = 100
+        view.zoom = 1.0
+        picks: list[tuple[int, int] | None] = []
+        view.set_pick_callback(picks.append, (100, 100))
+        view._on_press(types.SimpleNamespace(x=5, y=5))
+        assert picks == [None]
+    finally:
+        root.destroy()
