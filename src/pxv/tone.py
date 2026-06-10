@@ -105,3 +105,63 @@ def mid_to_gamma(in_black: int, in_white: int, x: float) -> float:
     span = max(1, in_white - in_black)
     t = min(0.9995, max(0.0005, (x - in_black) / span))
     return min(10.0, max(0.1, math.log(t) / math.log(0.5)))
+
+
+CurvePoints = tuple[tuple[int, int], ...]
+IDENTITY_CURVE: CurvePoints = ((0, 0), (255, 255))
+
+
+def curve_lut(points: CurvePoints) -> list[int]:
+    """256-entry LUT through control points via monotone cubic interpolation.
+
+    x must be strictly increasing; y is free in 0-255, so non-monotone curves
+    (solarize) are allowed. Outside the x range the LUT extends flat.
+
+    AIDEV-NOTE: Fritsch–Butland tangents — zero at local extrema, weighted
+    harmonic mean elsewhere — keep every segment monotone between its control
+    points (|m| <= 3|d| condition), which is what prevents overshoot. Keep
+    this property: the curve editor promises "no wiggles between handles".
+    """
+    if len(points) < 2:
+        raise ValueError("curve needs at least 2 points")
+    xs = [float(p[0]) for p in points]
+    ys = [float(p[1]) for p in points]
+    if any(xs[i + 1] <= xs[i] for i in range(len(xs) - 1)):
+        raise ValueError("curve x values must be strictly increasing")
+
+    n = len(points)
+    h = [xs[i + 1] - xs[i] for i in range(n - 1)]
+    d = [(ys[i + 1] - ys[i]) / h[i] for i in range(n - 1)]
+
+    m = [0.0] * n
+    m[0] = d[0]
+    m[n - 1] = d[n - 2]
+    for i in range(1, n - 1):
+        if d[i - 1] * d[i] <= 0:
+            m[i] = 0.0
+        else:
+            w1 = 2 * h[i] + h[i - 1]
+            w2 = h[i] + 2 * h[i - 1]
+            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+
+    lut: list[int] = []
+    seg = 0
+    for x in range(256):
+        if x <= xs[0]:
+            y = ys[0]
+        elif x >= xs[-1]:
+            y = ys[-1]
+        else:
+            while xs[seg + 1] < x:
+                seg += 1
+            t = (x - xs[seg]) / h[seg]
+            t2 = t * t
+            t3 = t2 * t
+            y = (
+                (2 * t3 - 3 * t2 + 1) * ys[seg]
+                + (t3 - 2 * t2 + t) * h[seg] * m[seg]
+                + (-2 * t3 + 3 * t2) * ys[seg + 1]
+                + (t3 - t2) * h[seg] * m[seg + 1]
+            )
+        lut.append(max(0, min(255, int(y + 0.5))))
+    return lut

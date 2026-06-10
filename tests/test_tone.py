@@ -5,9 +5,11 @@ from __future__ import annotations
 import pytest
 
 from pxv.tone import (
+    IDENTITY_CURVE,
     LevelsChannel,
     auto_levels,
     compose_luts,
+    curve_lut,
     gamma_to_mid,
     levels_lut,
     mid_to_gamma,
@@ -124,3 +126,39 @@ def test_levels_lut_monotonic_for_normal_params() -> None:
     ):
         lut = levels_lut(ch)
         assert all(lut[i + 1] >= lut[i] for i in range(255)), ch
+
+
+def test_curve_lut_identity() -> None:
+    assert curve_lut(IDENTITY_CURVE) == IDENTITY
+
+
+def test_curve_lut_two_point_inversion() -> None:
+    lut = curve_lut(((0, 255), (255, 0)))
+    assert lut == [255 - i for i in range(256)]
+
+
+def test_curve_lut_s_curve_monotone_no_overshoot() -> None:
+    lut = curve_lut(((0, 0), (64, 16), (192, 239), (255, 255)))
+    assert lut[0] == 0 and lut[255] == 255
+    assert lut[64] == 16 and lut[192] == 239  # interpolant passes through points
+    assert all(lut[i + 1] >= lut[i] for i in range(255))  # no overshoot wiggles
+
+
+def test_curve_lut_solarize_allowed() -> None:
+    lut = curve_lut(((0, 0), (128, 255), (255, 0)))
+    assert lut[0] == 0 and lut[128] == 255 and lut[255] == 0
+    assert all(lut[i + 1] >= lut[i] for i in range(127))  # rises to the peak
+    assert all(lut[i + 1] <= lut[i] for i in range(128, 255))  # falls after it
+
+
+def test_curve_lut_flat_extension_outside_x_range() -> None:
+    lut = curve_lut(((50, 100), (200, 150)))
+    assert lut[0] == 100 and lut[49] == 100
+    assert lut[201] == 150 and lut[255] == 150
+
+
+def test_curve_lut_rejects_bad_input() -> None:
+    with pytest.raises(ValueError):
+        curve_lut(((0, 0),))
+    with pytest.raises(ValueError):
+        curve_lut(((0, 0), (0, 255)))  # x not strictly increasing
