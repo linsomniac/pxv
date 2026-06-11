@@ -925,3 +925,52 @@ def test_tiny_select_drag_is_a_click_not_a_move(tmp_path) -> None:  # noqa: ANN0
         palette._end_session(bake=False)
     finally:
         root.destroy()
+
+
+def test_escape_cancels_move_with_latch_and_rolls_back(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_drag((45.0, 40.0))  # +20,+30: mid-move
+        assert palette.layer.shapes[0].points == ((30.0, 40.0), (60.0, 40.0))
+        palette.on_escape()
+        # The move was ONE coalesced undo state: rolled back exactly.
+        assert palette.layer.shapes[0].points == ((10.0, 10.0), (40.0, 10.0))
+        assert palette.layer.selected is None  # layer.undo() clears selection
+        assert app.canvas_view._marker_id is None
+        assert not palette.is_dragging
+        palette.on_drag((60.0, 60.0))  # latched: swallowed
+        assert palette.layer.shapes[0].points == ((10.0, 10.0), (40.0, 10.0))
+        palette.on_release((60.0, 60.0))  # the physical release re-arms us
+        palette.select_tool_key("3")
+        palette.on_press((10.0, 50.0))
+        palette.on_drag((40.0, 50.0))
+        palette.on_release((40.0, 50.0))
+        assert len(palette.layer.shapes) == 2  # drawing works again
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_escape_deselects_before_doing_nothing(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        app.annotation_palette = palette  # cmd_escape routes through the app attr
+        _draw_line(palette, y=10.0)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        assert palette.layer.selected == 0
+        commands.cmd_escape(app)  # the root Escape entry point
+        assert palette.layer.selected is None  # deselect step
+        assert app.canvas_view._marker_id is None
+        assert len(palette.layer.shapes) == 1  # nothing deleted or undone
+        commands.cmd_escape(app)  # nothing selected: consumed, no-op
+        assert app.annotation_palette is palette  # never exits the mode
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()

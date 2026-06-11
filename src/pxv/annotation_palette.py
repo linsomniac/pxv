@@ -394,17 +394,33 @@ class AnnotationPalette(tk.Toplevel):
         self.app.refresh_display()
 
     def on_escape(self) -> None:
-        """Escape inside the mode: cancel an in-flight drag, else nothing.
+        """Escape inside the mode: cancel a drag, else deselect, else nothing.
 
         AIDEV-NOTE: Never exits the mode (no accidental bakes) and never
         falls through to app.escape_action — leaving fullscreen during a
         session is f/F11. The latch swallows the cancelled drag's remaining
         motion events until the physical ButtonRelease (see on_release).
+        A cancelled MOVE rolls back through layer.undo(): the move run is one
+        coalesced undo state, so one undo restores the pre-move shape exactly
+        (the aborted move parks on the redo stack — accepted quirk).
         """
         if self._drag_points is not None:
             self._drag_points = None
             self._cancel_latch = True
             self.app.canvas_view.clear_preview()
+            return
+        if self._select_drag is not None:
+            if self._select_moved:
+                self.layer.undo()  # rolls back the move, clears the selection
+                self.app.refresh_display()
+            self._select_drag = None
+            self._select_moved = False
+            self._cancel_latch = True
+            self._refresh_selection_marker()
+            return
+        if self.layer.selected is not None:
+            self.layer.selected = None
+            self._refresh_selection_marker()
 
     # --- session end -----------------------------------------------------
 
