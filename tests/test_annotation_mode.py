@@ -1711,7 +1711,8 @@ def test_full_session_end_to_end_bake_save_reload(tmp_path, monkeypatch) -> None
         assert reloaded.getpixel((60, 30)) == (255, 0, 0)  # MOVED rect's left edge
         assert reloaded.getpixel((50, 25)) == (0, 0, 255)  # pre-move spot never baked
         assert reloaded.getpixel((75, 30)) == (0, 0, 255)  # outline rect stays hollow
-        label_area = list(reloaded.crop((10, 10, 25, 25)).getdata())
+        label_box = reloaded.crop((10, 10, 25, 25))
+        label_area = [label_box.getpixel((x, y)) for x in range(15) for y in range(15)]
         assert any(px != (0, 0, 255) for px in label_area)  # glyph pixels landed
     finally:
         root.destroy()
