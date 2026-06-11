@@ -56,6 +56,24 @@ def test_keybindings_table_lists_browse() -> None:
     assert "b" in keys
 
 
+def test_keybindings_lists_draw_key_distinct_from_background_toggle() -> None:
+    from pxv.dialogs import KEYBINDINGS
+
+    by_key = {k: desc for k, desc in KEYBINDINGS if k}
+    assert "draw" in by_key["d"].lower()  # KeyError here = the d row is missing
+    assert "background" in by_key["D"].lower()  # D keeps its own, distinct row
+
+
+def test_keybindings_has_draw_mode_section() -> None:
+    from pxv.dialogs import KEYBINDINGS
+
+    descriptions = [desc for _key, desc in KEYBINDINGS]
+    assert any("drawing palette is open" in d for d in descriptions)  # section header
+    by_key = {k: desc for k, desc in KEYBINDINGS if k}
+    assert "1-8" in by_key  # the stable tool numbering
+    assert "Delete / Backspace" in by_key
+
+
 # --- draw-mode command gating (annotation_gate) -------------------------------
 
 
