@@ -300,3 +300,61 @@ def test_reset_restores_metadata_and_keep_flag(exif_jpeg: object) -> None:
     model.reset()
     assert model.metadata.exif.get(0x010E) == "orig desc"
     assert model.keep_metadata is False
+
+
+# --- apply_overlay (annotation bake) ------------------------------------------
+
+
+def _dot_overlay(size: tuple[int, int]) -> Image.Image:
+    """Transparent RGBA overlay with one opaque and one half-alpha red pixel."""
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    overlay.putpixel((1, 1), (255, 0, 0, 255))
+    overlay.putpixel((2, 1), (255, 0, 0, 128))
+    return overlay
+
+
+def test_apply_overlay_paints_working_image() -> None:
+    model = ImageModel()
+    model.working_image = Image.new("RGB", (4, 4), (0, 0, 255))
+    model.apply_overlay(_dot_overlay((4, 4)))
+    assert model.working_image is not None
+    assert model.working_image.getpixel((1, 1)) == (255, 0, 0)  # opaque replaces
+    r, g, b = model.working_image.getpixel((2, 1))  # type: ignore[misc]
+    assert 126 <= r <= 130 and g == 0 and 124 <= b <= 129  # ~50% red over blue
+    assert model.working_image.getpixel((0, 0)) == (0, 0, 255)  # untouched elsewhere
+
+
+def test_apply_overlay_keeps_buffers_in_lockstep() -> None:
+    model = ImageModel()
+    model.working_image = Image.new("RGB", (4, 4), (0, 0, 255))
+    model._save_rgba = Image.new("RGBA", (4, 4), (0, 0, 255, 200))
+    model.apply_overlay(_dot_overlay((4, 4)))
+    assert model._save_rgba is not None
+    assert model._save_rgba.getpixel((1, 1)) == (255, 0, 0, 255)
+    assert model._save_rgba.getpixel((0, 0)) == (0, 0, 255, 200)  # alpha intact
+
+
+def test_apply_overlay_opaque_image_keeps_no_save_rgba() -> None:
+    model = ImageModel()
+    model.working_image = Image.new("RGB", (4, 4), (0, 0, 255))
+    model.apply_overlay(_dot_overlay((4, 4)))
+    assert model._save_rgba is None
+
+
+def test_apply_overlay_replaces_buffer_objects() -> None:
+    # Consumers key caches on working_image object identity (enhancement-dialog
+    # input histograms, the annotation stale-image guard) — see the method note.
+    model = ImageModel()
+    working_before = Image.new("RGB", (4, 4), (0, 0, 255))
+    rgba_before = Image.new("RGBA", (4, 4), (0, 0, 255, 255))
+    model.working_image = working_before
+    model._save_rgba = rgba_before
+    model.apply_overlay(_dot_overlay((4, 4)))
+    assert model.working_image is not working_before
+    assert model._save_rgba is not rgba_before
+
+
+def test_apply_overlay_no_image_is_noop() -> None:
+    model = ImageModel()
+    model.apply_overlay(Image.new("RGBA", (4, 4), (0, 0, 0, 0)))
+    assert model.working_image is None

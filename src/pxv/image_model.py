@@ -287,6 +287,26 @@ class ImageModel:
         if self._save_rgba is not None:
             self._save_rgba = self._save_rgba.resize(new_size, Image.Resampling.LANCZOS)
 
+    def apply_overlay(self, overlay: Image.Image) -> None:
+        """Alpha-composite a full-resolution RGBA overlay onto both buffers.
+
+        AIDEV-NOTE: The annotation-bake mutator (2026-06-10 design).
+        working_image (RGB) takes a paste-with-mask; _save_rgba, when present,
+        takes a proper RGBA alpha_composite — in lockstep, so annotations
+        survive alpha-preserving saves of transparent images. Both buffers are
+        REPLACED, never mutated in place: consumers key caches on
+        working_image object identity (the enhancement dialog's input
+        histograms, the annotation stale-image guard), and every other
+        mutator in this class replaces the object too.
+        """
+        if self.working_image is None:
+            return
+        base = self.working_image.copy()
+        base.paste(overlay, (0, 0), overlay)
+        self.working_image = base
+        if self._save_rgba is not None:
+            self._save_rgba = Image.alpha_composite(self._save_rgba, overlay)
+
     def reset(self) -> None:
         """Reset working image to original (undo all destructive ops)."""
         if self.original_image is not None:
