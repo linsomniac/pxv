@@ -50,6 +50,7 @@ line-length = 99
 
 [tool.mypy]
 strict = true
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = "PIL.*"

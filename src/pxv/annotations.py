@@ -66,9 +66,10 @@ def _segment_distance(
     ax, ay = a
     bx, by = b
     dx, dy = bx - ax, by - ay
-    if dx == 0.0 and dy == 0.0:
+    den = dx * dx + dy * dy
+    if den == 0.0:
         return math.hypot(px - ax, py - ay)
-    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / den))
     return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 
 
@@ -90,24 +91,41 @@ def _shape_hit(shape: Shape, xy: tuple[float, float], tol: float) -> bool:
             return x0 - tol <= xy[0] <= x1 + tol and y0 - tol <= xy[1] <= y1 + tol
         corners = ((x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0))
         return min(_segment_distance(xy, corners[i], corners[i + 1]) for i in range(4)) <= tol
-    # AIDEV-NOTE: Ellipse hit via normalized radius r (1.0 = on the curve) with
-    # the tolerance scaled by the smaller semi-axis — exact for circles, a bit
-    # generous along an eccentric ellipse's major axis. Accepted heuristic.
+    # AIDEV-NOTE: Ellipse hit via gradient-normalized distance. r is the
+    # normalised radius (1.0 = on the curve). True Euclidean distance to the
+    # ellipse boundary is approximated as |r - 1| * r / |∇r|, where
+    # |∇r| = hypot(x/rx², y/ry²) is the spatial gradient of r at the probe
+    # point. This approximation is tight near the curve and handles eccentric
+    # ellipses correctly (unlike the old tol/min(rx,ry) band, which was up to
+    # rx/ry× too generous along the major axis of a flat ellipse).
+    # At the exact centre the gradient is ~0; we guard that by treating the
+    # centre as "hit" for filled shapes (distance = min(rx,ry)) and "miss" for
+    # outline shapes. Arrows hit-test on the shaft polyline only — the head
+    # wings that extend beyond tol do not contribute to selection.
     cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
     rx, ry = max((x1 - x0) / 2.0, 1e-6), max((y1 - y0) / 2.0, 1e-6)
     r = math.hypot((xy[0] - cx) / rx, (xy[1] - cy) / ry)
-    band = tol / min(rx, ry)
+    gx = (xy[0] - cx) / rx**2
+    gy = (xy[1] - cy) / ry**2
+    grad = math.hypot(gx, gy)
+    if grad < 1e-12:
+        # Exact centre: treat as interior for fill, miss for outline.
+        if shape.fill:
+            return True
+        return False
+    curve_dist = abs(r - 1.0) * r / grad
     if shape.fill:
-        return r <= 1.0 + band
-    return abs(r - 1.0) <= band
+        return r <= 1.0 or curve_dist <= tol
+    return curve_dist <= tol
 
 
 def hit_test(shapes: Sequence[Shape], xy: tuple[float, float], tol: float) -> int | None:
     """Topmost shape under xy (z = insertion order), or None.
 
-    Distance-to-polyline for freehand/highlight/line/arrow; border (or interior
-    when filled) for rect/ellipse; heuristic bbox for text. tol is in image
-    pixels; the caller computes it as max(6.0 / zoom, width_px / 2).
+    Distance-to-polyline for freehand/highlight/line/arrow (arrows hit-test on
+    the shaft polyline only — head wings beyond tol do not select); border (or
+    interior when filled) for rect/ellipse; heuristic bbox for text. tol is in
+    image pixels; callers should use hit_tolerance().
     """
     for i in range(len(shapes) - 1, -1, -1):
         if _shape_hit(shapes[i], xy, tol):
@@ -134,7 +152,12 @@ def size_presets(image_long_side: int) -> SizePresets:
 
 
 def hit_tolerance(zoom: float, width_px: float) -> float:
-    """Image-px hit tolerance: max(shape-independent 6.0 / zoom, width_px / 2)."""
+    """Image-px hit tolerance: max(shape-independent 6.0 / zoom, width_px / 2).
+
+    zoom is clamped to a minimum of 1e-6 so degenerate windows (zoom 0.0 from
+    zoom_fit on an empty canvas) never raise ZeroDivisionError.
+    """
+    zoom = max(zoom, 1e-6)
     return max(6.0 / zoom, width_px / 2)
 
 

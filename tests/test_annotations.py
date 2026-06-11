@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import pytest
 
@@ -132,7 +133,7 @@ def test_hit_tolerance_formula() -> None:
 
 def test_layer_add_bumps_revision_monotonically() -> None:
     layer = AnnotationLayer()
-    assert layer.shapes == () and layer.selected is None and layer.revision == 0
+    assert not layer.shapes and layer.selected is None and layer.revision == 0
     layer.add(_line(0.0, 0.0, 1.0, 1.0))
     assert len(layer.shapes) == 1 and layer.revision > 0
     r1 = layer.revision
@@ -177,14 +178,14 @@ def test_layer_undo_redo_roundtrip() -> None:
     layer.add(a)
     layer.add(b)
     assert layer.undo() is True
-    assert layer.shapes == (a,)
+    assert tuple(layer.shapes) == (a,)
     assert layer.undo() is True
-    assert layer.shapes == ()
+    assert not layer.shapes
     assert layer.undo() is False  # stack exhausted -> caller consumes the key
     assert layer.redo() is True
-    assert layer.shapes == (a,)
+    assert tuple(layer.shapes) == (a,)
     assert layer.redo() is True
-    assert layer.shapes == (a, b)
+    assert tuple(layer.shapes) == (a, b)
     assert layer.redo() is False
 
 
@@ -204,6 +205,7 @@ def test_layer_redo_cleared_by_new_action() -> None:
     layer.add(_line(0.0, 0.0, 1.0, 1.0))
     layer.undo()
     layer.add(_line(2.0, 2.0, 3.0, 3.0))
+    assert not layer._redo_stack
     assert layer.redo() is False
 
 
@@ -214,14 +216,18 @@ def test_layer_replace_selected_coalesces() -> None:
     layer.selected = 0
     r = layer.revision
     layer.replace_selected(original.translated(1.0, 0.0))
+    r1 = layer.revision
+    assert r1 > r  # every change re-renders the overlay (strictly increasing)
     layer.replace_selected(original.translated(2.0, 0.0))
+    r2 = layer.revision
+    assert r2 > r1
     layer.replace_selected(original.translated(3.0, 0.0))
+    assert layer.revision > r2
     assert layer.shapes[0].points[0] == (3.0, 0.0)
-    assert layer.revision == r + 3  # every change re-renders the overlay...
-    assert layer.undo() is True  # ...but the whole run is ONE undo step
-    assert layer.shapes == (original,)
+    assert layer.undo() is True  # the whole run is ONE undo step
+    assert tuple(layer.shapes) == (original,)
     assert layer.undo() is True
-    assert layer.shapes == ()
+    assert not layer.shapes
 
 
 def test_layer_coalescing_breaks_on_reselect() -> None:
@@ -235,7 +241,7 @@ def test_layer_coalescing_breaks_on_reselect() -> None:
     layer.undo()
     assert layer.shapes[0].points[0] == (1.0, 0.0)  # only the second run undone
     layer.undo()
-    assert layer.shapes == (original,)
+    assert tuple(layer.shapes) == (original,)
 
 
 def test_layer_replace_without_selection_is_noop() -> None:
@@ -252,3 +258,68 @@ def test_layer_undo_clears_selection() -> None:
     layer.selected = 0
     layer.undo()
     assert layer.selected is None
+
+
+# --- Finding 1: eccentric-ellipse hit-test regression ---
+
+
+def test_hit_test_eccentric_ellipse_not_overgenerous() -> None:
+    """The old tol/min(rx,ry) band was up to rx/ry× too generous along the major
+    axis of a flat ellipse. The gradient-normalized formula must reject probes
+    that are clearly inside the curve and only accept ones near the boundary."""
+    flat = Shape(tool="ellipse", points=((0.0, 0.0), (200.0, 10.0)), color="#ff0000", width_px=2.0)
+    # A point roughly 40 px inside the right side of a 200×10 ellipse must miss.
+    assert hit_test((flat,), (160.0, 5.0), 3.0) is None
+    # A point very close to the right tip of the curve must hit.
+    assert hit_test((flat,), (199.0, 5.0), 3.0) == 0
+    # Filled interior must hit.
+    filled = dataclasses.replace(flat, fill=True)
+    assert hit_test((filled,), (160.0, 5.0), 3.0) == 0
+    # A point well outside the ellipse (right of the tip) must miss even when filled.
+    assert hit_test((filled,), (220.0, 5.0), 3.0) is None
+
+
+# --- Finding 2: degenerate geometry tests ---
+
+
+def test_hit_test_single_point_freehand() -> None:
+    """A single-point freehand (click without drag) is treated as a polyline of
+    one vertex; it should be hit within tol and miss outside."""
+    dot = Shape(tool="freehand", points=((50.0, 50.0),), color="#ff0000", width_px=2.0)
+    assert hit_test((dot,), (51.0, 50.0), 3.0) == 0  # within tol
+    assert hit_test((dot,), (60.0, 50.0), 3.0) is None  # outside tol
+
+
+def test_hit_test_zero_length_line() -> None:
+    """A zero-length line (both endpoints equal) behaves like a single point."""
+    zerolen = Shape(
+        tool="line", points=((30.0, 30.0), (30.0, 30.0)), color="#ff0000", width_px=2.0
+    )
+    assert hit_test((zerolen,), (31.0, 30.0), 3.0) == 0  # within tol
+    assert hit_test((zerolen,), (40.0, 30.0), 3.0) is None  # outside tol
+
+
+def test_translated_text_shape_bbox_follows_move() -> None:
+    """translated() on a text shape must move its bbox anchor."""
+    s = Shape(
+        tool="text",
+        points=((10.0, 20.0),),
+        color="#000000",
+        width_px=2.0,
+        text="hi",
+        font_px=10.0,
+    )
+    moved = s.translated(5.0, -10.0)
+    x0, y0, x1, y1 = moved.bbox()
+    assert x0 == pytest.approx(15.0)
+    assert y0 == pytest.approx(10.0)
+    # width and height are unchanged
+    orig_bbox = s.bbox()
+    assert (x1 - x0) == pytest.approx(orig_bbox[2] - orig_bbox[0])
+    assert (y1 - y0) == pytest.approx(orig_bbox[3] - orig_bbox[1])
+
+
+def test_hit_tolerance_zero_zoom_guard() -> None:
+    """zoom=0 must not raise ZeroDivisionError; it is clamped to a minimum."""
+    result = hit_tolerance(0.0, 2.0)
+    assert math.isfinite(result) and result > 0
