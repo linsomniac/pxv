@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
-## [Unreleased]
+## [1.0.5] - 2026-06-10
 
 ### Added
 - Enhancement dialog overhaul: live histogram panel (luminance/RGB overlays,
@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (monotone spline editor per channel with histogram backdrop, editable
   Equalize, Invert), and a hold-to-Compare before/after button. All
   adjustments compose into a single LUT pass and bake undoably via Apply.
+
+## [1.0.4] - 2026-06-08
+
+### Added
+- Visual Schnauzer thumbnail browser: press `b` for a scrollable thumbnail grid
+  of the whole file list. Click or arrow to jump the viewer to any image; the
+  highlight stays in sync both ways, thumbnails load incrementally, and the
+  columns reflow to the window width.
 - Save-options dialog: when saving as JPEG, PNG, WebP, or TIFF, a small dialog now
   lets you choose encoding parameters — JPEG quality, PNG compression level, WebP
   lossless/quality, and TIFF compression (None/LZW/Deflate) — plus a "keep metadata"
@@ -30,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Ctrl+Z` to undo and `Ctrl+Y` / `Ctrl+Shift+Z` to redo; Undo/Redo are also in the
   right-click menu. This replaces the previous single-level "uncrop" (`u` is now a
   general undo); Reset and loading a new image start a fresh history.
+
+### Fixed
+- Thumbnail browser scrolls with two-finger trackpad gestures on Tk 9 (handles
+  `<TouchpadScroll>`, which uv-managed Pythons deliver instead of `<MouseWheel>`).
+- The browser closes cleanly on quit, cancelling its pending loader timers.
 
 ## [1.0.3] - 2026-06-05
 
