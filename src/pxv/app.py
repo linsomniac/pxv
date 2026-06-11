@@ -216,6 +216,7 @@ class PxvApp:
             # subsequent crop would target the wrong region. Every other mutating
             # path clears the selection; this one must too.
             self.canvas_view.clear_selection()
+            self.canvas_view.clear_preview()
             self._update_display()
 
     def _on_right_click(self, event: tk.Event) -> None:

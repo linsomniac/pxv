@@ -358,3 +358,18 @@ def test_apply_overlay_no_image_is_noop() -> None:
     model = ImageModel()
     model.apply_overlay(Image.new("RGBA", (4, 4), (0, 0, 0, 0)))
     assert model.working_image is None
+
+
+def test_apply_overlay_size_mismatch_raises_and_leaves_buffers_untouched() -> None:
+    """A mismatched overlay raises ValueError and leaves BOTH buffers unchanged."""
+    model = ImageModel()
+    working_before = Image.new("RGB", (4, 4), (0, 0, 255))
+    rgba_before = Image.new("RGBA", (4, 4), (0, 0, 255, 200))
+    model.working_image = working_before
+    model._save_rgba = rgba_before
+    bad_overlay = Image.new("RGBA", (8, 8), (255, 0, 0, 255))  # wrong size
+    with pytest.raises(ValueError, match="overlay size"):
+        model.apply_overlay(bad_overlay)
+    # Both buffers must be completely untouched.
+    assert model.working_image is working_before
+    assert model._save_rgba is rgba_before

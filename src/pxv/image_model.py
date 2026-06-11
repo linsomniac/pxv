@@ -298,14 +298,27 @@ class ImageModel:
         working_image object identity (the enhancement dialog's input
         histograms, the annotation stale-image guard), and every other
         mutator in this class replaces the object too.
+        AIDEV-NOTE: Atomicity — both new objects are computed BEFORE either
+        buffer is assigned so a size-mismatch ValueError leaves both buffers
+        untouched (the explicit guard below makes caller bugs surface loudly).
         """
         if self.working_image is None:
             return
-        base = self.working_image.copy()
-        base.paste(overlay, (0, 0), overlay)
-        self.working_image = base
-        if self._save_rgba is not None:
-            self._save_rgba = Image.alpha_composite(self._save_rgba, overlay)
+        if overlay.size != self.working_image.size:
+            raise ValueError(
+                f"overlay size {overlay.size} != working_image size {self.working_image.size}"
+            )
+        # Compute both new buffers before assigning either (atomicity).
+        new_working = self.working_image.copy()
+        new_working.paste(overlay, (0, 0), overlay)
+        new_rgba = (
+            Image.alpha_composite(self._save_rgba, overlay)
+            if self._save_rgba is not None
+            else None
+        )
+        self.working_image = new_working
+        if new_rgba is not None:
+            self._save_rgba = new_rgba
 
     def reset(self) -> None:
         """Reset working image to original (undo all destructive ops)."""
