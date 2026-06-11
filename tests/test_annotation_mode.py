@@ -222,7 +222,7 @@ def _make_app(tmp_path, count=1):  # noqa: ANN001, ANN201 - Tk fixture helper
 
 
 def _open_palette(app):  # noqa: ANN001, ANN202
-    """Construct the palette directly (cmd_annotate arrives in a later task)."""
+    """Construct the palette directly, bypassing cmd_annotate's gating."""
     from pxv.annotation_palette import AnnotationPalette
 
     palette = AnnotationPalette(app)

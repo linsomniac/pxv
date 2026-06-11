@@ -435,7 +435,7 @@ class PxvApp:
         AIDEV-NOTE: The ONE composite hook shared by refresh_display and
         _update_display — without the resize path, shapes would vanish on
         window resize. Only the rendered overlay is cached (in the palette,
-        keyed on (layer.revision, display size)); the composite happens fresh
+        keyed on (layer.revision, target_size, scale)); the composite happens fresh
         every call because the base changes under the same key (enhancement
         debounce, Compare, background toggle). Also the stale-image guard's
         first checkpoint: never composite against a replaced image.
