@@ -13,21 +13,27 @@ from __future__ import annotations
 import math
 import tkinter as tk
 from tkinter import colorchooser, messagebox, ttk
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, Union, cast
 
 from pxv.annotation_render import render_overlay
-from pxv.annotations import AnnotationLayer, Shape, Tool, size_presets
+from pxv.annotations import AnnotationLayer, Shape, Tool, hit_tolerance, size_presets
 
 if TYPE_CHECKING:
     from PIL import Image
 
     from pxv.app import PxvApp
 
+# The palette's active tool: any drawing Tool, or the non-drawing Select tool.
+# Shape.tool stays the narrower Tool — "select" never reaches a Shape.
+# typing.Union (not the | operator): this alias is evaluated at runtime.
+PaletteTool = Union[Tool, Literal["select"]]
+
 # AIDEV-NOTE: Tool numbering is stable across phases (2026-06-10 design):
 # 1 Select, 2 freehand, 3 line, 4 arrow, 5 rect, 6 ellipse, 7 highlighter,
-# 8 text. Phase 2 ships 2-6; the other keys are inert and their buttons
-# disabled until their phases (Select: 3; highlight/text: 4).
-TOOL_KEYS: dict[str, Tool] = {
+# 8 text. Phases 2-3 ship 1-6; the 7/8 keys are inert and their buttons
+# disabled until Phase 4.
+TOOL_KEYS: dict[str, PaletteTool] = {
+    "1": "select",
     "2": "freehand",
     "3": "line",
     "4": "arrow",
@@ -82,7 +88,7 @@ class AnnotationPalette(tk.Toplevel):
 
         # Styling state for NEW shapes (restyling a selection arrives in Phase 3).
         self._presets = size_presets(max(app.image_model.get_working_size()))
-        self.tool: Tool = "freehand"
+        self.tool: PaletteTool = "freehand"
         self.color: str = SWATCHES[0]
         self.width_px: float = self._presets.widths[1]  # medium
 
@@ -90,6 +96,10 @@ class AnnotationPalette(tk.Toplevel):
         self._drag_points: list[tuple[float, float]] | None = None
         # Escape latch: swallow motion/release until the physical ButtonRelease.
         self._cancel_latch = False
+        # In-flight Select-tool move: (press_xy, shape AS PRESSED), plus
+        # whether the 3-screen-px gate opened (a click with jitter ≠ a move).
+        self._select_drag: tuple[tuple[float, float], Shape] | None = None
+        self._select_moved = False
 
         self._tool_var = tk.StringVar(value=self.tool)
         self._size_var = tk.StringVar(value="medium")
@@ -118,7 +128,7 @@ class AnnotationPalette(tk.Toplevel):
         tools.pack(fill=tk.X)
         self._tool_buttons: dict[str, ttk.Radiobutton] = {}
         for key, label, shipped in (
-            ("1", "Select", False),
+            ("1", "Select", True),
             ("2", "Freehand", True),
             ("3", "Line", True),
             ("4", "Arrow", True),
@@ -196,15 +206,23 @@ class AnnotationPalette(tk.Toplevel):
 
     def select_tool_key(self, char: str) -> None:
         """Tool hotkey (root- and palette-bound). Unshipped keys are inert."""
+        if self.is_dragging:
+            return  # a mid-press switch would orphan the in-flight drag state
         tool = TOOL_KEYS.get(char)
         if tool is None:
             return
         self.tool = tool
         self._tool_var.set(tool)
+        self._update_canvas_cursor()
 
     def _on_tool_selected(self) -> None:
-        # Only enabled (shipped) radiobuttons can fire, so the var holds a Tool.
-        self.tool = cast(Tool, self._tool_var.get())
+        # Only enabled (shipped) radiobuttons can fire: the var holds a PaletteTool.
+        self.tool = cast(PaletteTool, self._tool_var.get())
+        self._update_canvas_cursor()
+
+    def _update_canvas_cursor(self) -> None:
+        """Arrow for Select, pencil for drawing tools (no-op once disarmed)."""
+        self.app.canvas_view.set_annotation_cursor(self.tool == "select")
 
     def set_color(self, color: str) -> None:
         """Set the '#rrggbb' color for NEW shapes."""
@@ -224,10 +242,15 @@ class AnnotationPalette(tk.Toplevel):
 
     @property
     def is_dragging(self) -> bool:
-        return self._drag_points is not None
+        # A Select press counts from the click itself, so the wheel and the
+        # zoom/navigation keys stay consumed for the whole press-to-release.
+        return self._drag_points is not None or self._select_drag is not None
 
     def on_press(self, image_xy: tuple[float, float]) -> None:
         if self._cancel_latch:
+            return
+        if self.tool == "select":
+            self._select_press(image_xy)
             return
         # AIDEV-NOTE: Re-anchor to the current image if the session is empty and
         # the image was swapped since open — drawing on the new image is safe
@@ -238,8 +261,14 @@ class AnnotationPalette(tk.Toplevel):
         self._drag_points = [image_xy]
 
     def on_drag(self, image_xy: tuple[float, float]) -> None:
-        if self._cancel_latch or self._drag_points is None:
+        if self._cancel_latch:
             return
+        if self.tool == "select":
+            self._select_drag_to(image_xy)
+            return
+        if self._drag_points is None:
+            return
+        # self.tool is narrowed to Tool here (the "select" branch returned above)
         if self.tool == "freehand":
             self._drag_points.append(image_xy)
         else:
@@ -256,8 +285,12 @@ class AnnotationPalette(tk.Toplevel):
             # The physical ButtonRelease of an Escape-cancelled drag re-arms us.
             self._cancel_latch = False
             return
+        if self.tool == "select":
+            self._select_release(image_xy)
+            return
         if self._drag_points is None:
             return
+        # self.tool is narrowed to Tool here (the "select" branch returned above)
         points = self._drag_points
         self._drag_points = None
         self.app.canvas_view.clear_preview()
@@ -277,6 +310,52 @@ class AnnotationPalette(tk.Toplevel):
         )
         self.app.annotations_unsaved = True  # set on the first shape (and kept)
         self.app.refresh_display()
+
+    # --- Select tool (key 1) ----------------------------------------------
+
+    def _select_press(self, image_xy: tuple[float, float]) -> None:
+        """Click: pick the topmost hit (or deselect on empty), arm a move."""
+        tol = hit_tolerance(self.app.canvas_view.zoom, self.width_px)
+        index = self.layer.select_at(image_xy, tol)
+        self._select_drag = None if index is None else (image_xy, self.layer.shapes[index])
+        self._select_moved = False
+        self._refresh_selection_marker()
+
+    def _select_drag_to(self, image_xy: tuple[float, float]) -> None:
+        """Drag: move the selection. The whole run is ONE coalesced undo step."""
+        if self._select_drag is None:
+            return
+        (px, py), original = self._select_drag
+        dx, dy = image_xy[0] - px, image_xy[1] - py
+        zoom = self.app.canvas_view.zoom
+        if not self._select_moved and math.hypot(dx, dy) * zoom < MIN_DRAG_SCREEN_PX:
+            return  # a click with pointer jitter is a selection, not a move
+        self._select_moved = True
+        # AIDEV-NOTE: Every step is translated() from the shape AS PRESSED
+        # (absolute deltas), so a long move accumulates no float error, and
+        # consecutive replace_selected calls coalesce into one undo state
+        # (select_at at press broke the previous run).
+        self.layer.replace_selected(original.translated(dx, dy))
+        self._refresh_selection_marker()
+        self.app.refresh_display()
+
+    def _select_release(self, image_xy: tuple[float, float]) -> None:
+        """Release: the final pointer position is authoritative for a move."""
+        if self._select_drag is not None and self._select_moved:
+            (px, py), original = self._select_drag
+            self.layer.replace_selected(original.translated(image_xy[0] - px, image_xy[1] - py))
+            self._refresh_selection_marker()
+            self.app.refresh_display()
+        self._select_drag = None
+        self._select_moved = False
+
+    def _refresh_selection_marker(self) -> None:
+        """Sync the canvas marker with layer.selected (None clears it)."""
+        if self.layer.selected is None:
+            self.app.canvas_view.set_selection_marker(None)
+        else:
+            shape = self.layer.shapes[self.layer.selected]
+            self.app.canvas_view.set_selection_marker(shape.bbox())
 
     def render_display_overlay(self, target_size: tuple[int, int], scale: float) -> Image.Image:
         """The committed shapes rendered as an RGBA overlay at display size.

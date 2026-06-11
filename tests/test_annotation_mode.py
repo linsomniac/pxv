@@ -404,11 +404,12 @@ def test_undo_keys_swallowed_with_hint_while_open(tmp_path) -> None:  # noqa: AN
         root.destroy()
 
 
-def test_tool_keys_two_through_six_select_and_others_inert(tmp_path) -> None:  # noqa: ANN001
+def test_tool_keys_select_and_others_inert(tmp_path) -> None:  # noqa: ANN001
     app, root, _ = _make_app(tmp_path)
     try:
         palette = _open_palette(app)
         for char, tool in (
+            ("1", "select"),
             ("2", "freehand"),
             ("3", "line"),
             ("4", "arrow"),
@@ -418,7 +419,7 @@ def test_tool_keys_two_through_six_select_and_others_inert(tmp_path) -> None:  #
             palette.select_tool_key(char)
             assert palette.tool == tool
             assert palette._tool_var.get() == tool  # button row follows
-        for char in ("1", "7", "8"):  # unshipped phases: stable numbers, inert keys
+        for char in ("7", "8"):  # Phase 4 tools: stable numbers, inert keys
             palette.select_tool_key(char)
         assert palette.tool == "ellipse"
         palette._end_session(bake=False)
@@ -840,5 +841,87 @@ def test_annotation_cursor_switches_arrow_for_select() -> None:
         assert view.canvas.cget("cursor") == ""  # the default arrow
         view.set_annotation_cursor(False)
         assert view.canvas.cget("cursor") == "pencil"
+    finally:
+        root.destroy()
+
+
+def test_key_1_selects_select_tool_with_arrow_cursor(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        assert app.canvas_view.canvas.cget("cursor") == "pencil"
+        palette.select_tool_key("1")
+        assert palette.tool == "select"
+        assert app.canvas_view.canvas.cget("cursor") == ""  # the default arrow
+        palette.select_tool_key("3")
+        assert app.canvas_view.canvas.cget("cursor") == "pencil"
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_select_click_picks_topmost_and_shows_marker(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)  # shape 0
+        _draw_line(palette, y=10.0)  # shape 1, right on top of it
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        assert palette.layer.selected == 1  # topmost (later) wins
+        assert app.canvas_view._marker_id is not None
+        palette.on_press((25.0, 60.0))  # empty canvas area
+        palette.on_release((25.0, 60.0))
+        assert palette.layer.selected is None  # click-empty deselects
+        assert app.canvas_view._marker_id is None
+        palette.on_press((25.0, 10.0))
+        palette.select_tool_key("3")  # mid-press: inert, never orphans the drag
+        assert palette.tool == "select"
+        palette.on_release((25.0, 10.0))
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_select_drag_moves_shape_in_one_undo_step(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)  # (10,10)-(40,10)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        assert palette.is_dragging  # the whole press-to-release is a drag
+        palette.on_drag((30.0, 15.0))  # +5,+5 from the press point
+        palette.on_drag((35.0, 30.0))  # +10,+20 ABSOLUTE from the press point
+        palette.on_release((35.0, 30.0))
+        assert not palette.is_dragging
+        (shape,) = palette.layer.shapes
+        assert shape.points == ((20.0, 30.0), (50.0, 30.0))
+        assert palette.layer.selected == 0  # still selected after the move
+        assert palette.layer.undo() is True  # the whole move: ONE undo step
+        assert palette.layer.shapes[0].points == ((10.0, 10.0), (40.0, 10.0))
+        assert palette.layer.undo() is True  # the add itself
+        assert palette.layer.shapes == ()
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_tiny_select_drag_is_a_click_not_a_move(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_drag((26.0, 11.0))  # ~1.4 image px * zoom 1.0 < 3 screen px
+        palette.on_release((26.0, 11.0))
+        (shape,) = palette.layer.shapes
+        assert shape.points == ((10.0, 10.0), (40.0, 10.0))  # unmoved
+        assert palette.layer.selected == 0  # but selected
+        assert palette.layer.undo() is True
+        assert palette.layer.shapes == ()  # only the add was on the stack
+        palette._end_session(bake=False)
     finally:
         root.destroy()
