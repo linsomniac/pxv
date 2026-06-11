@@ -79,6 +79,7 @@ def _make_app() -> tuple[types.SimpleNamespace, "tk.Tk"]:
         canvas_view=canvas_view,
         info_dialog=None,
         enhancement_dialog=None,
+        annotation_palette=None,
         enhancement_params=EnhancementParams(),
         image_model=types.SimpleNamespace(
             keep_metadata=False,

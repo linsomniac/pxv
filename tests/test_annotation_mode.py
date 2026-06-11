@@ -623,3 +623,62 @@ def test_root_tool_keys_route_to_palette_when_open(tmp_path) -> None:  # noqa: A
         app.annotation_palette._on_done()
     finally:
         root.destroy()
+
+
+def test_gated_commands_show_hint_and_do_nothing(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_annotate(app)
+        size_before = app.image_model.get_working_size()
+        commands.cmd_rotate(app, 90)  # representative image-mutating command
+        assert app.image_model.get_working_size() == size_before
+        assert not app.history.can_undo
+        assert "close the drawing palette" in root.title()
+        commands.cmd_save_as(app)  # consumed before any dialog could open
+        commands.cmd_enhancement_dialog(app)  # the e <-> d mutual gate, e side
+        assert app.enhancement_dialog is None
+        assert app.annotation_palette is not None
+        app.annotation_palette._on_done()
+    finally:
+        root.destroy()
+
+
+def test_undo_keys_route_to_palette_when_open_and_history_when_closed(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        app.record_history()
+        commands.cmd_annotate(app)
+        commands.cmd_undo(app)  # all entry points funnel through cmd_undo/cmd_redo
+        assert "Select tool" in root.title()
+        commands.cmd_redo(app)
+        assert len(app.history._undo) == 1  # app history untouched while open
+        app.annotation_palette._on_done()  # empty layer: silent exit
+        commands.cmd_undo(app)  # closed: routes to app history again
+        assert len(app.history._undo) == 0
+    finally:
+        root.destroy()
+
+
+def test_zoom_consumed_during_drag_and_escape_never_leaves_mode(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+        palette.on_press((10.0, 10.0))
+        palette.on_drag((30.0, 30.0))
+        zoom_before = app.canvas_view.zoom
+        commands.cmd_zoom_increase(app)
+        assert app.canvas_view.zoom == zoom_before  # consumed mid-drag
+        palette.on_release((30.0, 30.0))
+        commands.cmd_zoom_increase(app)
+        assert app.canvas_view.zoom != zoom_before  # back to normal after release
+        # Escape is consumed entirely by the session — never escape_action:
+        app.start_slideshow()  # escape_action would stop it
+        commands.cmd_escape(app)
+        assert app.slideshow_active is True
+        assert app.annotation_palette is palette  # and it never exits the mode
+        app.stop_slideshow()
+        palette._end_session(bake=False)  # not _on_cancel: one shape committed -> it would prompt
+    finally:
+        root.destroy()

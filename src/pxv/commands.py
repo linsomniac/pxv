@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from PIL import Image
 
@@ -51,6 +51,43 @@ _OPEN_FILETYPES = [
     ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp *.ppm *.pgm *.pbm *.ico"),
     ("All files", "*.*"),
 ]
+
+
+def annotation_gate(app: PxvApp, kind: Literal["mutate", "zoom", "navigate"]) -> bool:
+    """Draw-mode chokepoint: may the calling command proceed?
+
+    AIDEV-NOTE: ONE gate for the whole command surface (2026-06-10 design) —
+    root keys and context-menu entries call the same cmd_* functions, so a
+    single check at the top of each covers both. Kinds:
+    - "mutate": image-mutating and save commands — consumed with a title hint
+      while the palette is open.
+    - "zoom": consumed only while an annotation drag is in flight.
+    - "navigate": consumed during a drag; otherwise unsaved annotation work
+      prompts "Discard annotations?" — confirming ends an active session,
+      clears the flag, and proceeds. An open session with NOTHING at stake
+      (empty layer, no unsaved bake) is silently torn down so navigation
+      never orphans canvas state.
+    Undo/redo and Escape do not come here: they route through the palette's
+    on_undo_key/on_redo_key/on_escape (see cmd_undo/cmd_redo/cmd_escape).
+    """
+    palette = app.annotation_palette
+    if kind == "mutate":
+        if palette is not None:
+            app.show_temp_title("pxv: close the drawing palette first")
+            return False
+        return True
+    if palette is not None and palette.is_dragging:
+        return False
+    if kind == "zoom":
+        return True
+    # kind == "navigate"
+    if app.annotations_unsaved:
+        if not messagebox.askyesno("pxv", "Discard annotations?"):
+            return False
+        app.annotations_unsaved = False
+    if palette is not None:
+        palette._end_session(bake=False)
+    return True
 
 
 def _resolve_save_format(path: str) -> tuple[str, str]:
@@ -118,6 +155,8 @@ def _exif_for_save(model: "ImageModel", fmt: str) -> bytes | None:
 
 def cmd_save_as(app: PxvApp) -> None:
     """Save the enhanced image via Save As dialog."""
+    if not annotation_gate(app, "mutate"):
+        return
     if app.image_model.working_image is None:
         return
 
@@ -182,6 +221,8 @@ def cmd_save_as(app: PxvApp) -> None:
 
 def cmd_crop(app: PxvApp) -> None:
     """Crop working image to the current rubber-band selection."""
+    if not annotation_gate(app, "mutate"):
+        return
     if not app.canvas_view.has_selection():
         return
     box = app.canvas_view.get_selection_image_coords(app.image_model.get_working_size())
@@ -195,6 +236,8 @@ def cmd_crop(app: PxvApp) -> None:
 
 def cmd_resize(app: PxvApp) -> None:
     """Open resize dialog and apply."""
+    if not annotation_gate(app, "mutate"):
+        return
     from pxv.dialogs import resize_dialog
 
     current_size = app.image_model.get_working_size()
@@ -210,6 +253,8 @@ def cmd_resize(app: PxvApp) -> None:
 
 def cmd_reset(app: PxvApp) -> None:
     """Reset to original image and clear enhancements."""
+    if not annotation_gate(app, "mutate"):
+        return
     app.image_model.reset()
     app.enhancement_params.reset()
     app.history.clear()
@@ -221,6 +266,8 @@ def cmd_reset(app: PxvApp) -> None:
 
 def cmd_rotate(app: PxvApp, degrees: int) -> None:
     """Rotate working image by 90, 180, or 270 degrees."""
+    if not annotation_gate(app, "mutate"):
+        return
     app.record_history()
     app.image_model.rotate(degrees)
     app.canvas_view.clear_selection()
@@ -228,6 +275,8 @@ def cmd_rotate(app: PxvApp, degrees: int) -> None:
 
 
 def cmd_flip_horizontal(app: PxvApp) -> None:
+    if not annotation_gate(app, "mutate"):
+        return
     app.record_history()
     app.image_model.flip_horizontal()
     app.canvas_view.clear_selection()
@@ -235,6 +284,8 @@ def cmd_flip_horizontal(app: PxvApp) -> None:
 
 
 def cmd_flip_vertical(app: PxvApp) -> None:
+    if not annotation_gate(app, "mutate"):
+        return
     app.record_history()
     app.image_model.flip_vertical()
     app.canvas_view.clear_selection()
@@ -301,6 +352,8 @@ def cmd_print(app: PxvApp) -> None:
 
 def cmd_zoom_normal(app: PxvApp) -> None:
     """Reset zoom to 1:1 pixel mapping."""
+    if not annotation_gate(app, "zoom"):
+        return
     app.canvas_view.zoom_normal()
     app.canvas_view.clear_selection()
     app.refresh_display()
@@ -308,6 +361,8 @@ def cmd_zoom_normal(app: PxvApp) -> None:
 
 def cmd_zoom_increase(app: PxvApp) -> None:
     """Increase zoom by 10%."""
+    if not annotation_gate(app, "zoom"):
+        return
     app.canvas_view.zoom_set(app.canvas_view.zoom * 1.1)
     app.canvas_view.clear_selection()
     app.refresh_display()
@@ -315,6 +370,8 @@ def cmd_zoom_increase(app: PxvApp) -> None:
 
 def cmd_zoom_reduce(app: PxvApp) -> None:
     """Reduce zoom by 10%."""
+    if not annotation_gate(app, "zoom"):
+        return
     app.canvas_view.zoom_set(app.canvas_view.zoom * 0.9)
     app.canvas_view.clear_selection()
     app.refresh_display()
@@ -322,6 +379,8 @@ def cmd_zoom_reduce(app: PxvApp) -> None:
 
 def cmd_zoom_double(app: PxvApp) -> None:
     """Double the zoom level."""
+    if not annotation_gate(app, "zoom"):
+        return
     app.canvas_view.zoom_set(app.canvas_view.zoom * 2.0)
     app.canvas_view.clear_selection()
     app.refresh_display()
@@ -329,6 +388,8 @@ def cmd_zoom_double(app: PxvApp) -> None:
 
 def cmd_zoom_halve(app: PxvApp) -> None:
     """Halve the zoom level."""
+    if not annotation_gate(app, "zoom"):
+        return
     app.canvas_view.zoom_set(app.canvas_view.zoom * 0.5)
     app.canvas_view.clear_selection()
     app.refresh_display()
@@ -336,6 +397,8 @@ def cmd_zoom_halve(app: PxvApp) -> None:
 
 def cmd_zoom_max(app: PxvApp) -> None:
     """Zoom to fill the display while preserving aspect ratio."""
+    if not annotation_gate(app, "zoom"):
+        return
     img_size = app.image_model.get_working_size()
     if img_size == (0, 0):
         return
@@ -347,6 +410,8 @@ def cmd_zoom_max(app: PxvApp) -> None:
 
 def cmd_autocrop(app: PxvApp) -> None:
     """Auto-crop uniform background borders from the image."""
+    if not annotation_gate(app, "mutate"):
+        return
     if app.image_model.working_image is None:
         return
     # AIDEV-NOTE: Capture before cropping, but only record if it actually crops \u2014
@@ -363,12 +428,22 @@ def cmd_autocrop(app: PxvApp) -> None:
 
 
 def cmd_undo(app: PxvApp) -> None:
-    """Undo the last destructive edit (crop, rotate, flip, resize, Apply)."""
+    """Undo the last destructive edit (crop, rotate, flip, resize, Apply).
+
+    While draw mode is active, ALL undo entry points (u, Ctrl-z, context
+    menu) land in the palette and never fall through to app history.
+    """
+    if app.annotation_palette is not None:
+        app.annotation_palette.on_undo_key()
+        return
     app.undo()
 
 
 def cmd_redo(app: PxvApp) -> None:
-    """Redo the last undone edit."""
+    """Redo the last undone edit (palette-routed while draw mode is active)."""
+    if app.annotation_palette is not None:
+        app.annotation_palette.on_redo_key()
+        return
     app.redo()
 
 
@@ -434,6 +509,8 @@ def cmd_info(app: PxvApp) -> None:
 
 def cmd_enhancement_dialog(app: PxvApp) -> None:
     """Open or raise the enhancement dialog."""
+    if not annotation_gate(app, "mutate"):
+        return
     from pxv.enhancement_dialog import EnhancementDialog
 
     if app.enhancement_dialog is not None:
@@ -495,7 +572,15 @@ def cmd_slideshow_adjust(app: PxvApp, delta_seconds: float) -> None:
 
 
 def cmd_escape(app: PxvApp) -> None:
-    """Escape key: exit presentation modes if active, else clear the selection."""
+    """Escape key: exit presentation modes if active, else clear the selection.
+
+    While draw mode is active the session consumes Escape entirely (cancel an
+    in-flight drag, never exit the mode) — leaving fullscreen mid-session is
+    f/F11 (2026-06-10 design).
+    """
+    if app.annotation_palette is not None:
+        app.annotation_palette.on_escape()
+        return
     app.escape_action()
 
 
