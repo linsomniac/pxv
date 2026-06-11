@@ -14,6 +14,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from pxv import commands
+from pxv.annotation_render import render_overlay
 from pxv.canvas_view import CanvasView
 from pxv.context_menu import ContextMenu
 from pxv.enhancements import EnhancementParams
@@ -25,6 +26,10 @@ from pxv.slideshow import DEFAULT_SLIDESHOW_SECONDS, adjusted_interval_ms, inter
 from pxv.thumbnails import ThumbnailCache
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pxv.annotation_palette import AnnotationPalette
+    from pxv.annotations import Shape
     from pxv.enhancement_dialog import EnhancementDialog
     from pxv.info_dialog import InfoDialog
     from pxv.thumbnail_browser import BrowserWindow
@@ -98,6 +103,13 @@ class PxvApp:
         self.enhancement_dialog: EnhancementDialog | None = None
         # Will be set if the info / EXIF dialog is open
         self.info_dialog: InfoDialog | None = None
+        # Will be set if the drawing palette (draw mode) is open
+        self.annotation_palette: AnnotationPalette | None = None
+        # AIDEV-NOTE: Annotation-specific dirty flag (2026-06-10 design) — set
+        # on the first shape and on bake; cleared by a successful save, a
+        # confirmed discard prompt, and load_current. Other edits keep pxv's
+        # historical silent-discard behavior.
+        self.annotations_unsaved: bool = False
         # AIDEV-NOTE: The Visual Schnauzer thumbnail browser (a non-modal Toplevel).
         # Held here so commands/load_current can drive it; None when closed.
         self.browser: BrowserWindow | None = None
@@ -265,6 +277,7 @@ class PxvApp:
         self.enhancement_params.reset()
         # AIDEV-NOTE: A freshly loaded image starts with empty undo/redo history.
         self.history.clear()
+        self.annotations_unsaved = False
         if self.enhancement_dialog is not None:
             self.enhancement_dialog.sync_sliders_from_params()
         if self.info_dialog is not None:
@@ -329,6 +342,32 @@ class PxvApp:
         snap = self.snapshot_state()
         if snap is not None:
             self.history.record(snap)
+
+    # --- annotations (draw mode) -----------------------------------------
+
+    def bake_annotations(self, shapes: Sequence[Shape]) -> None:
+        """Rasterize shapes into the image pixels as ONE undoable edit.
+
+        The crop/rotate command pattern: snapshot, mutate, refresh. An empty
+        layer exits silently with no history snapshot (checked up front, so
+        autocrop's conditional-snapshot dance is not needed).
+
+        AIDEV-NOTE: The bake composites onto the PRE-enhancement working
+        image, while the preview composited onto the post-enhancement display
+        — parity holds exactly when EnhancementParams is identity (the common
+        case). With live non-identity params the annotation pixels become
+        subject to the enhancement pass from here on: colors visibly shift at
+        Done and in the saved file. Accepted in the 2026-06-10 design — do
+        NOT "fix" this by inverse-mapping colors.
+        """
+        working = self.image_model.working_image
+        if working is None or not shapes:
+            return
+        self.record_history()
+        overlay = render_overlay(shapes, working.size, 1.0)
+        self.image_model.apply_overlay(overlay)
+        self.annotations_unsaved = True
+        self.refresh_display()
 
     def undo(self) -> None:
         if not self.history.can_undo:

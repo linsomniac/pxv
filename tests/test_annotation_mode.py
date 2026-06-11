@@ -197,3 +197,247 @@ def test_preview_kinds_coverage() -> None:
         view.clear_preview()
     finally:
         root.destroy()
+
+
+def _make_app(tmp_path, count=1):  # noqa: ANN001, ANN201 - Tk fixture helper
+    """Real PxvApp over `count` synthetic 100x80 PNGs, first one loaded (zoom 1)."""
+    from pxv.app import PxvApp
+    from pxv.file_list import FileList
+
+    colors = [(0, 0, 255), (0, 200, 0), (200, 200, 0)]
+    paths = []
+    for i in range(count):
+        p = tmp_path / f"img{i}.png"
+        Image.new("RGB", (100, 80), colors[i % 3]).save(p)
+        paths.append(p)
+    root = tk.Tk()
+    app = PxvApp(root, FileList(paths))
+    root.update()
+    app.load_current()
+    root.update()
+    assert app.canvas_view.zoom == 1.0  # the coordinate math below relies on it
+    return app, root, paths
+
+
+def _open_palette(app):  # noqa: ANN001, ANN202
+    """Construct the palette directly (cmd_annotate arrives in a later task)."""
+    from pxv.annotation_palette import AnnotationPalette
+
+    palette = AnnotationPalette(app)
+    app.annotation_palette = palette
+    return palette
+
+
+def _draw_line(palette, y=10.0):  # noqa: ANN001, ANN202
+    """One committed red line (10,y)-(40,y) through the session protocol."""
+    palette.select_tool_key("3")
+    palette.on_press((10.0, y))
+    palette.on_drag((40.0, y))
+    palette.on_release((40.0, y))
+
+
+def test_palette_arms_canvas_and_tears_down_through_end_session(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        assert app.canvas_view._annotation_session is palette
+        assert app.canvas_view.canvas.cget("cursor") == "pencil"
+        assert palette.layer.shapes == () and palette.tool == "freehand"
+        assert palette.protocol("WM_DELETE_WINDOW")  # window close = Done is wired
+        palette._end_session(bake=False)
+        assert app.canvas_view._annotation_session is None
+        assert app.annotation_palette is None
+        assert not palette.winfo_exists()
+    finally:
+        root.destroy()
+
+
+def test_session_press_drag_release_adds_shape_and_sets_flag(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("3")  # line
+        assert app.annotations_unsaved is False
+        palette.on_press((10.0, 10.0))
+        assert palette.is_dragging
+        palette.on_drag((40.0, 30.0))
+        assert app.canvas_view._preview_id is not None  # rubber-band preview live
+        palette.on_release((40.0, 30.0))
+        assert not palette.is_dragging
+        assert app.canvas_view._preview_id is None  # swapped for the PIL render
+        (shape,) = palette.layer.shapes
+        assert shape.tool == "line"
+        assert shape.points == ((10.0, 10.0), (40.0, 30.0))
+        assert shape.color == palette.color and shape.width_px == palette.width_px
+        assert app.annotations_unsaved is True  # set on the first shape
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_freehand_accumulates_points(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)  # default tool is freehand
+        palette.on_press((5.0, 5.0))
+        palette.on_drag((10.0, 5.0))
+        palette.on_drag((15.0, 8.0))
+        palette.on_release((20.0, 10.0))
+        (shape,) = palette.layer.shapes
+        assert shape.tool == "freehand"
+        assert shape.points == ((5.0, 5.0), (10.0, 5.0), (15.0, 8.0), (20.0, 10.0))
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_tiny_drag_is_discarded(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.on_press((10.0, 10.0))
+        palette.on_drag((11.0, 11.0))
+        palette.on_release((11.0, 11.0))  # ~1.4 image px * zoom 1.0 < 3 screen px
+        assert palette.layer.shapes == ()
+        assert app.annotations_unsaved is False
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_escape_cancels_drag_with_latch_until_physical_release(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.on_press((10.0, 10.0))
+        palette.on_drag((40.0, 40.0))
+        palette.on_escape()
+        assert not palette.is_dragging
+        assert app.canvas_view._preview_id is None
+        palette.on_drag((60.0, 60.0))  # swallowed by the latch
+        assert app.canvas_view._preview_id is None
+        palette.on_release((60.0, 60.0))  # the physical release: consumed, no shape
+        assert palette.layer.shapes == ()
+        palette.on_press((10.0, 10.0))  # latch is reset: drawing works again
+        palette.on_drag((40.0, 40.0))
+        palette.on_release((40.0, 40.0))
+        assert len(palette.layer.shapes) == 1
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_done_bakes_exactly_one_history_snapshot(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("5")  # rect (outline)
+        palette.on_press((10.0, 10.0))
+        palette.on_drag((40.0, 40.0))
+        palette.on_release((40.0, 40.0))
+        before = app.image_model.working_image
+        palette._on_done()
+        assert app.annotation_palette is None
+        assert len(app.history._undo) == 1  # ONE ordinary snapshot edit
+        working = app.image_model.working_image
+        assert working is not None and working is not before
+        assert working.getpixel((10, 25)) == (255, 0, 0)  # left edge of the rect
+        assert working.getpixel((25, 25)) == (0, 0, 255)  # hollow interior untouched
+        assert app.annotations_unsaved is True  # set on bake, awaiting a save
+    finally:
+        root.destroy()
+
+
+def test_done_with_empty_layer_records_nothing(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        before = app.image_model.working_image
+        palette._on_done()
+        assert app.annotation_palette is None
+        assert not app.history.can_undo  # no snapshot for an empty bake
+        assert app.image_model.working_image is before
+        assert app.annotations_unsaved is False
+    finally:
+        root.destroy()
+
+
+def test_cancel_prompts_then_discards(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette)
+        monkeypatch.setattr(
+            "pxv.annotation_palette.messagebox",
+            types.SimpleNamespace(askyesno=lambda *a, **k: False),
+        )
+        palette._on_cancel()  # declined: still open, shape kept
+        assert app.annotation_palette is palette and palette.winfo_exists()
+        assert len(palette.layer.shapes) == 1
+        monkeypatch.setattr(
+            "pxv.annotation_palette.messagebox",
+            types.SimpleNamespace(askyesno=lambda *a, **k: True),
+        )
+        palette._on_cancel()
+        assert app.annotation_palette is None
+        assert not app.history.can_undo  # Cancel bakes nothing
+        assert app.annotations_unsaved is False  # confirmed discard clears the flag
+        working = app.image_model.working_image
+        assert working is not None and working.getpixel((25, 10)) == (0, 0, 255)
+    finally:
+        root.destroy()
+
+
+def test_undo_keys_swallowed_with_hint_while_open(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        app.record_history()  # a fall-through to app history would be visible
+        palette.on_undo_key()
+        assert "Select tool" in root.title()
+        palette.on_redo_key()
+        assert len(app.history._undo) == 1  # untouched
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_tool_keys_two_through_six_select_and_others_inert(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        for char, tool in (
+            ("2", "freehand"),
+            ("3", "line"),
+            ("4", "arrow"),
+            ("5", "rect"),
+            ("6", "ellipse"),
+        ):
+            palette.select_tool_key(char)
+            assert palette.tool == tool
+            assert palette._tool_var.get() == tool  # button row follows
+        for char in ("1", "7", "8"):  # unshipped phases: stable numbers, inert keys
+            palette.select_tool_key(char)
+        assert palette.tool == "ellipse"
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_color_and_size_controls_style_new_shapes(tmp_path) -> None:  # noqa: ANN001
+    from pxv.annotations import size_presets
+
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.set_color("#00ff00")
+        palette._size_var.set("thick")
+        palette._on_size_selected()
+        _draw_line(palette)
+        (shape,) = palette.layer.shapes
+        assert shape.color == "#00ff00"
+        assert shape.width_px == size_presets(100).widths[2]  # long side = 100
+        assert palette._color_indicator.cget("bg") == "#00ff00"
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
