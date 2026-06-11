@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from pxv.annotations import Shape, hit_test, hit_tolerance, size_presets
+from pxv.annotations import AnnotationLayer, Shape, hit_test, hit_tolerance, size_presets
 
 
 def _line(x0: float, y0: float, x1: float, y1: float) -> Shape:
@@ -128,3 +128,127 @@ def test_size_presets_minimums() -> None:
 def test_hit_tolerance_formula() -> None:
     assert hit_tolerance(2.0, 2.0) == 3.0  # 6/zoom wins
     assert hit_tolerance(1.0, 20.0) == 10.0  # width/2 wins
+
+
+def test_layer_add_bumps_revision_monotonically() -> None:
+    layer = AnnotationLayer()
+    assert layer.shapes == () and layer.selected is None and layer.revision == 0
+    layer.add(_line(0.0, 0.0, 1.0, 1.0))
+    assert len(layer.shapes) == 1 and layer.revision > 0
+    r1 = layer.revision
+    layer.add(_line(1.0, 1.0, 2.0, 2.0))
+    assert len(layer.shapes) == 2 and layer.revision > r1
+
+
+def test_layer_delete_selected() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 10.0, 0.0))
+    layer.add(_line(0.0, 5.0, 10.0, 5.0))
+    layer.selected = 0
+    r = layer.revision
+    layer.delete_selected()
+    assert len(layer.shapes) == 1
+    assert layer.shapes[0].points[0] == (0.0, 5.0)  # the OTHER shape survived
+    assert layer.selected is None and layer.revision > r
+
+
+def test_layer_delete_without_selection_is_noop() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 1.0, 1.0))
+    r = layer.revision
+    layer.delete_selected()
+    assert len(layer.shapes) == 1 and layer.revision == r
+
+
+def test_layer_select_at_delegates_to_hit_test() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 100.0, 0.0))
+    r = layer.revision
+    assert layer.select_at((50.0, 1.0), 4.0) == 0
+    assert layer.selected == 0
+    assert layer.select_at((50.0, 50.0), 4.0) is None  # empty space deselects
+    assert layer.selected is None
+    assert layer.revision == r  # selection isn't rendered -> no overlay re-render
+
+
+def test_layer_undo_redo_roundtrip() -> None:
+    layer = AnnotationLayer()
+    a, b = _line(0.0, 0.0, 1.0, 1.0), _line(2.0, 2.0, 3.0, 3.0)
+    layer.add(a)
+    layer.add(b)
+    assert layer.undo() is True
+    assert layer.shapes == (a,)
+    assert layer.undo() is True
+    assert layer.shapes == ()
+    assert layer.undo() is False  # stack exhausted -> caller consumes the key
+    assert layer.redo() is True
+    assert layer.shapes == (a,)
+    assert layer.redo() is True
+    assert layer.shapes == (a, b)
+    assert layer.redo() is False
+
+
+def test_layer_undo_redo_bump_revision() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 1.0, 1.0))
+    r = layer.revision
+    layer.undo()
+    assert layer.revision > r
+    r = layer.revision
+    layer.redo()
+    assert layer.revision > r
+
+
+def test_layer_redo_cleared_by_new_action() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 1.0, 1.0))
+    layer.undo()
+    layer.add(_line(2.0, 2.0, 3.0, 3.0))
+    assert layer.redo() is False
+
+
+def test_layer_replace_selected_coalesces() -> None:
+    layer = AnnotationLayer()
+    original = _line(0.0, 0.0, 10.0, 0.0)
+    layer.add(original)
+    layer.selected = 0
+    r = layer.revision
+    layer.replace_selected(original.translated(1.0, 0.0))
+    layer.replace_selected(original.translated(2.0, 0.0))
+    layer.replace_selected(original.translated(3.0, 0.0))
+    assert layer.shapes[0].points[0] == (3.0, 0.0)
+    assert layer.revision == r + 3  # every change re-renders the overlay...
+    assert layer.undo() is True  # ...but the whole run is ONE undo step
+    assert layer.shapes == (original,)
+    assert layer.undo() is True
+    assert layer.shapes == ()
+
+
+def test_layer_coalescing_breaks_on_reselect() -> None:
+    layer = AnnotationLayer()
+    original = _line(0.0, 0.0, 10.0, 0.0)
+    layer.add(original)
+    layer.select_at((5.0, 0.0), 2.0)
+    layer.replace_selected(original.translated(1.0, 0.0))
+    layer.select_at((5.0, 1.0), 2.0)  # re-select the same shape
+    layer.replace_selected(original.translated(2.0, 0.0))
+    layer.undo()
+    assert layer.shapes[0].points[0] == (1.0, 0.0)  # only the second run undone
+    layer.undo()
+    assert layer.shapes == (original,)
+
+
+def test_layer_replace_without_selection_is_noop() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 1.0, 1.0))
+    r = layer.revision
+    layer.replace_selected(_line(5.0, 5.0, 6.0, 6.0))
+    assert layer.shapes[0].points[0] == (0.0, 0.0) and layer.revision == r
+
+
+def test_layer_undo_clears_selection() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 1.0, 1.0))
+    layer.selected = 0
+    layer.undo()
+    assert layer.selected is None
