@@ -127,8 +127,10 @@ def test_size_presets_minimums() -> None:
 
 
 def test_hit_tolerance_formula() -> None:
-    assert hit_tolerance(2.0, 2.0) == 3.0  # 6/zoom wins
-    assert hit_tolerance(1.0, 20.0) == 10.0  # width/2 wins
+    assert hit_tolerance(1.0, 2.0) == 6.0  # 6/zoom dominates thin strokes
+    assert hit_tolerance(2.0, 2.0) == 3.0  # zoomed in: tighter picking
+    assert hit_tolerance(0.5, 2.0) == 12.0  # zoomed out: more forgiving
+    assert hit_tolerance(1.0, 20.0) == 10.0  # thick strokes: width/2 wins
 
 
 def test_layer_add_bumps_revision_monotonically() -> None:
@@ -323,3 +325,45 @@ def test_hit_tolerance_zero_zoom_guard() -> None:
     """zoom=0 must not raise ZeroDivisionError; it is clamped to a minimum."""
     result = hit_tolerance(0.0, 2.0)
     assert math.isfinite(result) and result > 0
+
+
+def test_hit_tolerance_feeds_select_at() -> None:
+    layer = AnnotationLayer()
+    layer.add(_line(0.0, 0.0, 100.0, 0.0))
+    assert layer.select_at((50.0, 5.0), hit_tolerance(1.0, 2.0)) == 0  # tol 6
+    assert layer.select_at((50.0, 5.0), hit_tolerance(2.0, 2.0)) is None  # tol 3
+
+
+def test_move_run_from_original_is_driftless_and_one_undo_step() -> None:
+    # The Select tool's move-drag: every step is translated() from the shape
+    # AS PRESSED (absolute deltas, no accumulation), and the coalescing in
+    # replace_selected makes the whole run ONE undo step.
+    layer = AnnotationLayer()
+    original = _line(0.0, 0.0, 10.0, 0.0)
+    layer.add(original)
+    layer.select_at((5.0, 0.0), 2.0)
+    for dx in (0.1, 0.2, 0.3, 7.0):
+        layer.replace_selected(original.translated(dx, 0.0))
+    assert layer.shapes[0].points == ((7.0, 0.0), (17.0, 0.0))  # exact, no drift
+    assert layer.undo() is True
+    assert layer.shapes == (original,)  # one step back to the pressed shape
+    assert layer.undo() is True
+    assert layer.shapes == ()
+
+
+def test_restyle_runs_split_by_reselect_are_separate_undo_steps() -> None:
+    # The palette's restyle flow: swatch/size walks on one selection coalesce;
+    # re-selecting starts a fresh undo step.
+    layer = AnnotationLayer()
+    original = _line(0.0, 0.0, 10.0, 0.0)
+    layer.add(original)
+    layer.select_at((5.0, 0.0), 2.0)
+    layer.replace_selected(dataclasses.replace(original, color="#00ff00"))
+    layer.replace_selected(dataclasses.replace(original, color="#0000ff"))
+    layer.select_at((5.0, 0.0), 2.0)  # re-select the same shape
+    layer.replace_selected(dataclasses.replace(layer.shapes[0], width_px=8.0))
+    assert layer.shapes[0].color == "#0000ff" and layer.shapes[0].width_px == 8.0
+    layer.undo()
+    assert layer.shapes[0].color == "#0000ff" and layer.shapes[0].width_px == 2.0
+    layer.undo()
+    assert layer.shapes == (original,)

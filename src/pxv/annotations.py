@@ -153,14 +153,21 @@ def size_presets(image_long_side: int) -> SizePresets:
     )
 
 
+# AIDEV-NOTE: Select-tool pick tolerance (2026-06-10 design): forgiving to
+# ~6 SCREEN px at any zoom, widened to half the stroke width so thick shapes
+# are as easy to grab as they look. Pure — the palette passes the live zoom
+# and its current width_px (hit_test takes one tol for all shapes).
+HIT_TOL_SCREEN_PX = 6.0
+
+
 def hit_tolerance(zoom: float, width_px: float) -> float:
-    """Image-px hit tolerance: max(shape-independent 6.0 / zoom, width_px / 2).
+    """Image-px hit-test tolerance for the Select tool: max(6.0/zoom, width/2).
 
     zoom is clamped to a minimum of 1e-6 so degenerate windows (zoom 0.0 from
     zoom_fit on an empty canvas) never raise ZeroDivisionError.
     """
     zoom = max(zoom, 1e-6)
-    return max(6.0 / zoom, width_px / 2)
+    return max(HIT_TOL_SCREEN_PX / zoom, width_px / 2.0)
 
 
 class AnnotationLayer:
