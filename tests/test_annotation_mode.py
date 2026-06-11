@@ -1644,3 +1644,105 @@ def test_context_menu_draw_entry_opens_palette(tmp_path) -> None:  # noqa: ANN00
         palette._on_done()
     finally:
         root.destroy()
+
+
+def test_full_session_end_to_end_bake_save_reload(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    """The whole user flow on one 100x80 blue PNG at zoom 1 (see _make_app)."""
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+
+        # Arrow (tool 4) along y=60 — default red, medium width (2.0 at 100px).
+        palette.select_tool_key("4")
+        palette.on_press((10.0, 60.0))
+        palette.on_drag((40.0, 60.0))
+        palette.on_release((40.0, 60.0))
+
+        # Outline rect (tool 5) at the top right.
+        palette.select_tool_key("5")
+        palette.on_press((50.0, 10.0))
+        palette.on_drag((80.0, 30.0))
+        palette.on_release((80.0, 30.0))
+
+        # Select (tool 1) the rect by its left border, move it down-right 10,10.
+        palette.select_tool_key("1")
+        palette.on_press((50.0, 20.0))
+        palette.on_drag((60.0, 30.0))
+        palette.on_release((60.0, 30.0))
+        assert palette.layer.shapes[1].points == ((60.0, 20.0), (90.0, 40.0))
+
+        # Text label (tool 8) at the top left, committed through the popup.
+        palette.select_tool_key("8")
+        palette.on_press((10.0, 10.0))
+        root.update()
+        assert palette._text_entry is not None
+        palette._text_entry.insert(0, "Hi")
+        palette._on_text_popup_return(types.SimpleNamespace())
+        assert len(palette.layer.shapes) == 3
+
+        # Done bakes all three shapes as ONE undoable edit.
+        palette._on_done()
+        assert app.annotation_palette is None
+        assert len(app.history._undo) == 1
+
+        # Save As -> PNG (file and options dialogs stubbed), then reload.
+        out = tmp_path / "annotated.png"
+        monkeypatch.setattr(
+            commands, "filedialog", types.SimpleNamespace(asksaveasfilename=lambda **k: str(out))
+        )
+        monkeypatch.setattr(
+            "pxv.dialogs.save_options_dialog", lambda *a, **k: (app.save_options, False)
+        )
+        assert commands.cmd_save_as(app) is True
+        assert app.annotations_unsaved is False  # the save cleared the flag
+
+        reloaded = Image.open(out)
+        assert reloaded.size == (100, 80)
+        assert reloaded.getpixel((25, 60)) == (255, 0, 0)  # arrow shaft
+        assert reloaded.getpixel((60, 30)) == (255, 0, 0)  # MOVED rect's left edge
+        assert reloaded.getpixel((50, 25)) == (0, 0, 255)  # pre-move spot never baked
+        assert reloaded.getpixel((75, 30)) == (0, 0, 255)  # outline rect stays hollow
+        label_area = list(reloaded.crop((10, 10, 25, 25)).getdata())
+        assert any(px != (0, 0, 255) for px in label_area)  # glyph pixels landed
+    finally:
+        root.destroy()
+
+
+def test_transparent_png_annotation_preserves_alpha(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    """Spec edge case: apply_overlay paints both buffers — alpha survives the save."""
+    from pxv.app import PxvApp
+    from pxv.file_list import FileList
+
+    src = tmp_path / "alpha.png"
+    Image.new("RGBA", (60, 50), (0, 200, 0, 120)).save(src)
+    root = tk.Tk()
+    try:
+        app = PxvApp(root, FileList([src]))
+        root.update()
+        app.load_current()
+        root.update()
+        assert app.image_model._save_rgba is not None  # transparency detected at load
+
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+        _draw_line(palette, y=25.0)  # red line (10,25)-(40,25), width 2
+        palette._on_done()
+
+        out = tmp_path / "alpha_out.png"
+        monkeypatch.setattr(
+            commands, "filedialog", types.SimpleNamespace(asksaveasfilename=lambda **k: str(out))
+        )
+        monkeypatch.setattr(
+            "pxv.dialogs.save_options_dialog", lambda *a, **k: (app.save_options, False)
+        )
+        assert commands.cmd_save_as(app) is True
+
+        reloaded = Image.open(out).convert("RGBA")
+        assert reloaded.size == (60, 50)
+        assert reloaded.getpixel((5, 5)) == (0, 200, 0, 120)  # alpha intact off-stroke
+        assert reloaded.getpixel((25, 25)) == (255, 0, 0, 255)  # opaque stroke pixel
+    finally:
+        root.destroy()
