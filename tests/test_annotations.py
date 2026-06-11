@@ -260,7 +260,7 @@ def test_layer_undo_clears_selection() -> None:
     assert layer.selected is None
 
 
-# --- Finding 1: eccentric-ellipse hit-test regression ---
+# --- Eccentric-ellipse hit-testing must not be over-generous ---
 
 
 def test_hit_test_eccentric_ellipse_not_overgenerous() -> None:
@@ -279,7 +279,7 @@ def test_hit_test_eccentric_ellipse_not_overgenerous() -> None:
     assert hit_test((filled,), (220.0, 5.0), 3.0) is None
 
 
-# --- Finding 2: degenerate geometry tests ---
+# --- Degenerate geometry (clicks without drags, zero-length segments) ---
 
 
 def test_hit_test_single_point_freehand() -> None:
