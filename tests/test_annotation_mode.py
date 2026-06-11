@@ -790,3 +790,55 @@ def test_quit_prompts_when_annotations_unsaved(tmp_path, monkeypatch) -> None:  
         # ("pyimage N does not exist" cross-contamination).
         monkeypatch.undo()
         root.destroy()
+
+
+def test_selection_marker_converts_image_space_dashed_single_item() -> None:
+    root = tk.Tk()
+    try:
+        view = _canvas_view(root)
+        view.set_selection_marker((10.0, 20.0, 30.0, 40.0))
+        assert view._marker_id is not None
+        # Image (10,20)/(30,40) -> canvas (110,120)/(130,140) via the centering
+        # offset (100), then padded by 3 canvas px on every side.
+        assert view.canvas.coords(view._marker_id) == [107.0, 117.0, 133.0, 143.0]
+        assert view.canvas.itemcget(view._marker_id, "dash") != ""  # dashed
+        first = view._marker_id
+        view.set_selection_marker((0.0, 0.0, 10.0, 10.0))
+        assert view._marker_id != first
+        assert len(view.canvas.find_withtag("all")) == 1  # ONE item: old deleted
+        view.set_selection_marker(None)
+        assert view._marker_id is None
+        assert len(view.canvas.find_withtag("all")) == 0
+    finally:
+        root.destroy()
+
+
+def test_selection_marker_rederived_on_display_and_cleared_on_disarm() -> None:
+    root = tk.Tk()
+    try:
+        view = _canvas_view(root)
+        view.set_selection_marker((10.0, 20.0, 30.0, 40.0))
+        view.zoom = 2.0
+        view.display(Image.new("RGB", (200, 200), (0, 0, 0)))  # re-render, new zoom
+        # 200x200 display on a 300x300 canvas -> offset 50; image*2 + 50, pad 3.
+        assert view.canvas.coords(view._marker_id) == [67.0, 87.0, 113.0, 133.0]
+        view.set_annotation_session(_RecordingSession())
+        view.set_annotation_session(None)  # disarm clears the marker
+        assert view._marker_id is None
+    finally:
+        root.destroy()
+
+
+def test_annotation_cursor_switches_arrow_for_select() -> None:
+    root = tk.Tk()
+    try:
+        view = _canvas_view(root)
+        view.set_annotation_cursor(True)  # disarmed: a no-op
+        assert view.canvas.cget("cursor") == "crosshair"
+        view.set_annotation_session(_RecordingSession())
+        view.set_annotation_cursor(True)
+        assert view.canvas.cget("cursor") == ""  # the default arrow
+        view.set_annotation_cursor(False)
+        assert view.canvas.cget("cursor") == "pencil"
+    finally:
+        root.destroy()

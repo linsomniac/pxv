@@ -118,6 +118,11 @@ def image_xy_to_canvas_point(
     return (ix * zoom + (area_w - disp_w) / 2, iy * zoom + (area_h - disp_h) / 2)
 
 
+# Canvas-px padding around the Select tool's dashed selection marker, so a
+# zero-height bbox (a horizontal line, a 2-point shape) still reads as a box.
+_MARKER_PAD = 3.0
+
+
 class AnnotationSession(Protocol):
     """What CanvasView needs from the draw-mode session (the palette).
 
@@ -177,6 +182,9 @@ class CanvasView:
         self._annotation_session: AnnotationSession | None = None
         # The single transient drag-preview item (draw mode).
         self._preview_id: int | None = None
+        # The Select tool's dashed marker: Tk item id + IMAGE-space bbox truth.
+        self._marker_id: int | None = None
+        self._marker_bbox: tuple[float, float, float, float] | None = None
 
         self._bind_mouse()
 
@@ -236,6 +244,9 @@ class CanvasView:
         # preserves the user's current pan position.
         if size_changed:
             self._center_view()
+        # Re-derive the Select tool's marker from image-space truth — its
+        # canvas coords go stale on every zoom/pan/resize re-render.
+        self._redraw_selection_marker()
 
     def _center_view(self) -> None:
         """Center the viewport on the image (only matters when image > canvas)."""
@@ -292,9 +303,11 @@ class CanvasView:
         AIDEV-NOTE: Entering clears any rubber-band selection (selection
         handling is suspended for the whole session) and shows the pencil
         cursor — the canvas is already crosshair normally, so the mode is
-        visually distinct. Disarming clears the transient preview item; the
-        palette calls this FIRST in _end_session (the eyedropper _on_close
-        pattern), so no event can reach a dying session.
+        visually distinct (the Select tool switches to the default arrow via
+        set_annotation_cursor). Disarming clears the transient preview item
+        AND the selection marker; the palette calls this FIRST in
+        _end_session (the eyedropper _on_close pattern), so no event can
+        reach a dying session.
         """
         self._annotation_session = session
         if session is not None:
@@ -302,6 +315,7 @@ class CanvasView:
             self.canvas.config(cursor="pencil")
         else:
             self.clear_preview()
+            self.set_selection_marker(None)
             self.canvas.config(cursor="crosshair")
 
     def _event_image_xy(self, event: tk.Event) -> tuple[float, float]:
@@ -363,6 +377,50 @@ class CanvasView:
         if self._preview_id is not None:
             self.canvas.delete(self._preview_id)
             self._preview_id = None
+
+    def set_selection_marker(self, bbox: tuple[float, float, float, float] | None) -> None:
+        """Show (or clear with None) the Select tool's dashed selection marker.
+
+        AIDEV-NOTE: bbox is IMAGE-space (x0, y0, x1, y1) — the shape's source
+        of truth. The Tk item is re-derived inside display() on every
+        re-render, so zoom/pan/resize can never strand it at stale coords.
+        """
+        self._marker_bbox = bbox
+        self._redraw_selection_marker()
+
+    def _redraw_selection_marker(self) -> None:
+        """(Re)create the marker item from the stored image-space bbox."""
+        if self._marker_id is not None:
+            self.canvas.delete(self._marker_id)
+            self._marker_id = None
+        if self._marker_bbox is None:
+            return
+        disp = (self._display_width, self._display_height)
+        csize = (self.canvas.winfo_width(), self.canvas.winfo_height())
+        x0, y0 = image_xy_to_canvas_point(
+            (self._marker_bbox[0], self._marker_bbox[1]), disp, csize, self.zoom
+        )
+        x1, y1 = image_xy_to_canvas_point(
+            (self._marker_bbox[2], self._marker_bbox[3]), disp, csize, self.zoom
+        )
+        self._marker_id = self.canvas.create_rectangle(
+            x0 - _MARKER_PAD,
+            y0 - _MARKER_PAD,
+            x1 + _MARKER_PAD,
+            y1 + _MARKER_PAD,
+            outline="#ffffff",
+            dash=(4, 4),
+            width=1,
+        )
+
+    def set_annotation_cursor(self, select_tool: bool) -> None:
+        """Default arrow for the Select tool, pencil for the drawing tools.
+
+        A no-op while disarmed, so a late tool-change callback can never
+        repaint the cursor after the session ended.
+        """
+        if self._annotation_session is not None:
+            self.canvas.config(cursor="" if select_tool else "pencil")
 
     def zoom_normal(self) -> None:
         self.zoom = 1.0
