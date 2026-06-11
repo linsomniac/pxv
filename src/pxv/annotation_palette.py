@@ -174,14 +174,18 @@ class AnnotationPalette(tk.Toplevel):
 
         colors = ttk.LabelFrame(main, text="Color", padding=6)
         colors.pack(fill=tk.X, pady=(6, 0))
+        # AIDEV-NOTE: tk.Label, NOT tk.Button — macOS Aqua native buttons
+        # ignore bg entirely, rendering every swatch white (2026-06-11 mac
+        # report); labels honor bg on all platforms. Pinned by
+        # test_color_swatches_show_their_color_and_click_selects.
+        self._swatches: list[tk.Label] = []
         for col, swatch in enumerate(SWATCHES):
-            tk.Button(
-                colors,
-                bg=swatch,
-                activebackground=swatch,
-                width=2,
-                command=lambda c=swatch: self.set_color(c),  # type: ignore[misc]
-            ).grid(row=0, column=col, padx=2)
+            # padx/pady restore the old tk.Button's ~42x27 px click target —
+            # a bare width=2 Label is under half that size on X11/Windows.
+            lbl = tk.Label(colors, bg=swatch, width=2, relief=tk.RAISED, bd=2, padx=12, pady=4)
+            lbl.grid(row=0, column=col, padx=2)
+            lbl.bind("<Button-1>", lambda _e, c=swatch: self.set_color(c))  # type: ignore[misc]
+            self._swatches.append(lbl)
         ttk.Button(colors, text="Custom…", width=8, command=self._on_custom_color).grid(
             row=0, column=len(SWATCHES), padx=(8, 2)
         )

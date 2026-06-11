@@ -455,6 +455,27 @@ def test_color_and_size_controls_style_new_shapes(tmp_path) -> None:  # noqa: AN
         root.destroy()
 
 
+def test_color_swatches_show_their_color_and_click_selects(tmp_path) -> None:  # noqa: ANN001
+    """Swatches must not be native tk.Buttons: macOS Aqua ignores a button's
+    bg, rendering every swatch white (2026-06-11 mac report)."""
+    from pxv.annotation_palette import SWATCHES
+
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        assert len(palette._swatches) == len(SWATCHES)
+        for widget, color in zip(palette._swatches, SWATCHES):
+            assert not isinstance(widget, tk.Button)
+            assert str(widget.cget("background")) == color
+        palette.set_color("#123456")
+        palette._swatches[2].event_generate("<Button-1>")
+        root.update()
+        assert palette.color == SWATCHES[2]
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
 def test_overlay_composites_in_both_display_paths(tmp_path, monkeypatch) -> None:  # noqa: ANN001
     app, root, _ = _make_app(tmp_path)
     try:
