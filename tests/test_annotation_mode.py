@@ -44,6 +44,9 @@ class _RecordingSession:
     def on_view_scrolled(self) -> None:
         pass
 
+    def on_double_click(self, image_xy: tuple[float, float]) -> None:
+        self.events.append(("double", image_xy))
+
 
 def _canvas_view(root):  # noqa: ANN001, ANN202 - Tk fixture helper
     """A bare 300x300 CanvasView pretending to show a 100x100 image at zoom 1."""
@@ -1513,5 +1516,91 @@ def test_image_xy_to_screen_accounts_for_scroll() -> None:
         # Scrolling right 50 px shifts the screen X leftward by 50 px.
         assert sx1 == sx0 - 50
         assert sy1 == sy0  # vertical position unchanged
+    finally:
+        root.destroy()
+
+
+def test_canvas_double_click_forwards_to_session_or_falls_back() -> None:
+    root = tk.Tk()
+    try:
+        view = _canvas_view(root)
+        session = _RecordingSession()
+        view.set_annotation_session(session)
+        view._on_double_click(types.SimpleNamespace(x=150, y=150))
+        assert session.events == [("double", (50.0, 50.0))]
+        view.set_annotation_session(None)
+        view._on_double_click(types.SimpleNamespace(x=10, y=10))
+        assert view._rb_start is not None  # disarmed: behaves like a plain press
+    finally:
+        root.destroy()
+
+
+def test_select_double_click_reedits_text_prefilled(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert palette._text_entry is not None
+        palette._text_entry.insert(0, "old")
+        palette._on_text_popup_return(types.SimpleNamespace())
+        palette.select_tool_key("1")
+        # The physical event stream: press, release, double (press#2), release
+        # (Tk routes the second press to <Double-Button-1>, never the plain press).
+        palette.on_press((22.0, 32.0))
+        palette.on_release((22.0, 32.0))
+        palette.on_double_click((22.0, 32.0))
+        entry = palette._text_entry
+        assert entry is not None
+        assert entry.get() == "old"  # pre-filled
+        assert palette._text_edit_index == 0
+        palette.on_release((22.0, 32.0))  # the trailing physical release: latched
+        assert palette._text_popup is not None  # the release must NOT cancel it
+        entry.delete(0, tk.END)
+        entry.insert(0, "new")
+        palette._on_text_popup_return(types.SimpleNamespace())
+        assert palette.layer.shapes[0].text == "new"
+        assert palette.layer.shapes[0].points == ((20.0, 30.0),)  # anchor kept
+        assert palette.layer.undo() is True  # the edit is ONE undo step
+        assert palette.layer.shapes[0].text == "old"
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_double_click_on_non_text_latches_until_release(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        palette.on_double_click((25.0, 10.0))
+        assert palette._text_popup is None  # only text shapes re-edit
+        assert palette.layer.selected == 0  # still picked
+        palette.on_drag((60.0, 60.0))  # between double and physical release
+        assert palette.layer.shapes[0].points == ((10.0, 10.0), (40.0, 10.0))  # swallowed
+        palette.on_release((60.0, 60.0))  # the physical release re-arms
+        palette.on_press((25.0, 10.0))
+        palette.on_drag((35.0, 20.0))
+        palette.on_release((35.0, 20.0))
+        assert palette.layer.shapes[0].points == ((20.0, 20.0), (50.0, 20.0))  # moves again
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_double_click_with_drawing_tool_is_a_fast_second_press(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)  # default tool: freehand
+        palette.on_double_click((5.0, 5.0))  # Tk swallowed the plain second press
+        assert palette.is_dragging  # the stroke still starts
+        palette.on_drag((25.0, 5.0))
+        palette.on_release((45.0, 5.0))
+        (shape,) = palette.layer.shapes
+        assert shape.points == ((5.0, 5.0), (25.0, 5.0), (45.0, 5.0))
+        palette._end_session(bake=False)
     finally:
         root.destroy()

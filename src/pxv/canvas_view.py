@@ -144,6 +144,8 @@ class AnnotationSession(Protocol):
 
     def on_view_scrolled(self) -> None: ...
 
+    def on_double_click(self, image_xy: tuple[float, float]) -> None: ...
+
 
 class CanvasView:
     """Canvas widget that displays an image with rubber-band selection and zoom."""
@@ -194,6 +196,11 @@ class CanvasView:
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        # AIDEV-NOTE: Within one bind tag Tk fires only the MOST SPECIFIC
+        # pattern, so the second press of a double-click triggers this and
+        # never <ButtonPress-1> — _on_double_click delegates to _on_press
+        # when no annotation session is armed, keeping old behavior intact.
+        self.canvas.bind("<Double-Button-1>", self._on_double_click)
         # Right-click: Button-3 on Linux/Windows, Button-2 on macOS
         self.canvas.bind("<Button-3>", self._on_right_click_event)
         self.canvas.bind("<Button-2>", self._on_right_click_event)
@@ -543,6 +550,15 @@ class CanvasView:
 
         # Normalize: ensure x1 > x0, y1 > y0
         self._selection = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+    def _on_double_click(self, event: tk.Event) -> None:
+        """Second press of a double-click (replaces the plain press — see _bind_mouse)."""
+        if self._annotation_session is not None:
+            self._annotation_session.on_double_click(self._event_image_xy(event))
+            return
+        # No session: delegate to the plain press so pre-draw-mode behavior
+        # (the second press restarting the rubber band) is unchanged.
+        self._on_press(event)
 
     def _on_mouse_wheel(self, event: tk.Event) -> str | None:
         """Pan the view with the scroll wheel (Shift = horizontal)."""

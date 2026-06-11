@@ -410,6 +410,33 @@ class AnnotationPalette(tk.Toplevel):
         self.app.annotations_unsaved = True  # set on the first shape (and kept)
         self.app.refresh_display()
 
+    def on_double_click(self, image_xy: tuple[float, float]) -> None:
+        """Second press of a double-click (Tk suppresses the plain press).
+
+        AIDEV-NOTE: With the Select tool the double-click WINS over the second
+        press's select/drag interpretation: the same cancelled-until-release
+        latch Escape uses swallows motion/release until the physical
+        ButtonRelease. A double on a text shape reopens the entry popup
+        pre-filled — the ONLY re-edit path (2026-06-10 design). For the
+        drawing/text tools a double is just a fast second press and delegates
+        to on_press, so rapid successive strokes are never lost.
+        """
+        if self._cancel_latch:
+            return
+        if self.tool != "select":
+            self.on_press(image_xy)
+            return
+        self._cancel_latch = True
+        self._select_drag = None
+        self._select_moved = False
+        tol = hit_tolerance(self.app.canvas_view.zoom, self.width_px)
+        index = self.layer.select_at(image_xy, tol)
+        self._refresh_selection_marker()
+        if index is not None and self.layer.shapes[index].tool == "text":
+            # Popup at the label's own anchor, pre-filled (select_at above
+            # broke replace-coalescing, so the commit is one clean undo step).
+            self._open_text_popup(self.layer.shapes[index].points[0], edit_index=index)
+
     # --- Select tool (key 1) ----------------------------------------------
 
     def _select_press(self, image_xy: tuple[float, float]) -> None:
