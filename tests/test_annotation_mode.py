@@ -785,4 +785,8 @@ def test_quit_prompts_when_annotations_unsaved(tmp_path, monkeypatch) -> None:  
         commands.cmd_quit(app)
         assert destroyed == [True]
     finally:
+        # Undo the destroy monkeypatch FIRST: the stub above swallows destroy,
+        # and a leaked Tk root poisons every later Tk test in the session
+        # ("pyimage N does not exist" cross-contamination).
+        monkeypatch.undo()
         root.destroy()
