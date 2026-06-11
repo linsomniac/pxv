@@ -205,8 +205,11 @@ class PxvApp:
         self.root.bind("<Control-s>", lambda _: commands.cmd_save_as(self))
         self.root.bind("<space>", lambda _: commands.cmd_next_image(self))
         self.root.bind("<Right>", lambda _: commands.cmd_next_image(self))
-        self.root.bind("<BackSpace>", lambda _: commands.cmd_prev_image(self))
+        # AIDEV-NOTE: BackSpace doubles as delete-with-selection in draw mode
+        # (the Left arrow stays pure navigation); Delete is draw-mode only.
+        self.root.bind("<BackSpace>", lambda _: commands.cmd_backspace(self))
         self.root.bind("<Left>", lambda _: commands.cmd_prev_image(self))
+        self.root.bind("<Delete>", lambda _: commands.cmd_delete(self))
         self.root.bind("<Escape>", lambda _: commands.cmd_escape(self))
         self.root.bind("<question>", lambda _: commands.cmd_help(self))
         self.root.bind("<Key-i>", lambda _: commands.cmd_info(self))

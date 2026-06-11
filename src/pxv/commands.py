@@ -460,6 +460,31 @@ def cmd_redo(app: PxvApp) -> None:
     app.redo()
 
 
+def cmd_delete(app: PxvApp) -> None:
+    """Delete the selected annotation shape (Delete key; draw mode only).
+
+    Inert while the palette is closed — pxv binds <Delete> for draw mode
+    alone, and the palette mirrors the key on itself for when IT holds focus.
+    """
+    if app.annotation_palette is not None:
+        app.annotation_palette.on_delete_key()
+
+
+def cmd_backspace(app: PxvApp) -> None:
+    """BackSpace: delete the selected shape in draw mode, else previous image.
+
+    AIDEV-NOTE: Only BackSpace doubles as delete-with-selection (2026-06-10
+    design); the Left arrow stays pure navigation, so it binds straight to
+    cmd_prev_image while BackSpace routes here. Without a selection this
+    falls through to cmd_prev_image and its navigate gate (discard prompt).
+    """
+    palette = app.annotation_palette
+    if palette is not None and palette.layer.selected is not None:
+        palette.on_delete_key()
+        return
+    cmd_prev_image(app)
+
+
 def cmd_next_image(app: PxvApp) -> None:
     if not annotation_gate(app, "navigate"):
         return

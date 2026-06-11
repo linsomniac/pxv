@@ -412,10 +412,11 @@ class AnnotationPalette(tk.Toplevel):
             self.app.refresh_display()
 
     def on_delete_key(self) -> None:
-        """Delete the selected shape (selection ships in Phase 3; no-op now)."""
+        """Delete the selected shape (Delete, or BackSpace with a selection)."""
         if self.layer.selected is None:
             return
         self.layer.delete_selected()
+        self._refresh_selection_marker()
         self.app.refresh_display()
 
     def on_escape(self) -> None:

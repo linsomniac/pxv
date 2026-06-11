@@ -1066,3 +1066,57 @@ def test_undo_clears_selection_and_marker(tmp_path) -> None:  # noqa: ANN001
         palette._end_session(bake=False)
     finally:
         root.destroy()
+
+
+def test_delete_key_and_backspace_delete_selection(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path, count=2)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+        _draw_line(palette, y=10.0)
+        _draw_line(palette, y=30.0)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        commands.cmd_delete(app)  # the root <Delete> chokepoint
+        assert len(palette.layer.shapes) == 1
+        assert palette.layer.shapes[0].points[0] == (10.0, 30.0)  # other survived
+        assert palette.layer.selected is None
+        assert app.canvas_view._marker_id is None  # marker cleared with it
+        palette.on_press((25.0, 30.0))
+        palette.on_release((25.0, 30.0))
+        commands.cmd_backspace(app)  # BackSpace WITH a selection deletes
+        assert palette.layer.shapes == ()
+        assert app.file_list.index == 0  # and did NOT navigate
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_backspace_without_selection_navigates_through_the_gate(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path, count=2)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+        _draw_line(palette, y=10.0)  # unsaved work, nothing selected
+        monkeypatch.setattr(
+            commands, "messagebox", types.SimpleNamespace(askyesno=lambda *a, **k: True)
+        )
+        commands.cmd_backspace(app)  # no selection: the navigate gate runs
+        assert app.file_list.index == 1  # wrapped to the previous image
+        assert app.annotation_palette is None  # confirmed prompt ended the session
+        assert app.annotations_unsaved is False
+    finally:
+        root.destroy()
+
+
+def test_delete_key_inert_without_draw_mode(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        assert root.bind("<Delete>")  # the root binding exists
+        commands.cmd_delete(app)  # no palette: nothing to do, must not raise
+        assert app.annotation_palette is None
+    finally:
+        root.destroy()
