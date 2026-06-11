@@ -246,3 +246,21 @@ def test_filled_rect_respects_opacity() -> None:
     )
     overlay = render_overlay([s], (20, 20), 1.0)
     assert overlay.getpixel((10, 10)) == (255, 0, 0, 64)  # round(0.25 * 255)
+
+
+def test_text_scales_with_render_scale() -> None:
+    s = Shape(
+        tool="text",
+        points=((2.0, 2.0),),
+        color="#000000",
+        width_px=1.0,
+        text="Hello",
+        font_px=16.0,
+    )
+    small = render_overlay([s], (120, 60), 1.0).getchannel("A").getbbox()
+    big = render_overlay([s], (240, 120), 2.0).getchannel("A").getbbox()
+    assert small is not None and big is not None
+    if scalable_font_available():
+        # The glyph footprint roughly doubles with the scale (scalable font).
+        assert (big[2] - big[0]) > 1.5 * (small[2] - small[0])
+        assert (big[3] - big[1]) > 1.5 * (small[3] - small[1])

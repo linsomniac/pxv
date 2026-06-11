@@ -142,6 +142,8 @@ class AnnotationSession(Protocol):
 
     def on_release(self, image_xy: tuple[float, float]) -> None: ...
 
+    def on_view_scrolled(self) -> None: ...
+
 
 class CanvasView:
     """Canvas widget that displays an image with rubber-band selection and zoom."""
@@ -413,6 +415,25 @@ class CanvasView:
             width=1,
         )
 
+    def image_xy_to_screen(self, xy: tuple[float, float]) -> tuple[int, int]:
+        """Image-space point -> absolute SCREEN coords (text-popup placement).
+
+        AIDEV-NOTE: Canvas coords live in scrollregion space; subtracting
+        canvasx/y(0) converts to widget space (scroll-aware), and the widget's
+        root position lifts that to screen space. The result goes stale on any
+        zoom/pan/resize — the caller (the text popup) is CANCELLED on view
+        changes, never repositioned (2026-06-10 design).
+        """
+        cx, cy = image_xy_to_canvas_point(
+            xy,
+            (self._display_width, self._display_height),
+            (self.canvas.winfo_width(), self.canvas.winfo_height()),
+            self.zoom,
+        )
+        wx = cx - self.canvas.canvasx(0)  # type: ignore[no-untyped-call]
+        wy = cy - self.canvas.canvasy(0)  # type: ignore[no-untyped-call]
+        return (self.canvas.winfo_rootx() + int(wx), self.canvas.winfo_rooty() + int(wy))
+
     def set_annotation_cursor(self, select_tool: bool) -> None:
         """Default arrow for the Select tool, pencil for the drawing tools.
 
@@ -525,12 +546,19 @@ class CanvasView:
 
     def _on_mouse_wheel(self, event: tk.Event) -> str | None:
         """Pan the view with the scroll wheel (Shift = horizontal)."""
-        # AIDEV-NOTE: The wheel is pxv's only pan input; a view change mid-drag
-        # would shear the stroke, so wheel events are ignored while an
-        # annotation drag is in flight (zoom KEYS are consumed in commands.py;
-        # per-event coordinate conversion remains as defense in depth).
-        if self._annotation_session is not None and self._annotation_session.is_dragging:
-            return "break"
+        if self._annotation_session is not None:
+            # AIDEV-NOTE: The wheel is pxv's only pan input; a view change
+            # mid-drag would shear the stroke, so wheel events are ignored
+            # while an annotation drag is in flight (zoom KEYS are consumed
+            # in commands.py; per-event coordinate conversion remains as
+            # defense in depth).
+            if self._annotation_session.is_dragging:
+                return "break"
+            # A pan is a view change with NO re-render behind it, so the
+            # composite chokepoint (app._composite_annotations) never sees it
+            # — notify the session so an open text popup (screen-positioned)
+            # is dismissed, not stranded (2026-06-10 design).
+            self._annotation_session.on_view_scrolled()
         num = getattr(event, "num", 0)
         if num == 4:  # X11 scroll up
             delta = -1

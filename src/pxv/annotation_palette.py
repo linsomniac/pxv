@@ -16,7 +16,7 @@ from dataclasses import replace
 from tkinter import colorchooser, messagebox, ttk
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
-from pxv.annotation_render import render_overlay
+from pxv.annotation_render import render_overlay, scalable_font_available
 from pxv.annotations import AnnotationLayer, Shape, Tool, hit_tolerance, size_presets
 
 if TYPE_CHECKING:
@@ -31,8 +31,7 @@ PaletteTool = Union[Tool, Literal["select"]]
 
 # AIDEV-NOTE: Tool numbering is stable across phases (2026-06-10 design):
 # 1 Select, 2 freehand, 3 line, 4 arrow, 5 rect, 6 ellipse, 7 highlighter,
-# 8 text. 1-7 ship; the 8 key stays inert until the text tool lands later
-# in Phase 4.
+# 8 text. All eight tools ship as of Phase 4.
 TOOL_KEYS: dict[str, PaletteTool] = {
     "1": "select",
     "2": "freehand",
@@ -41,6 +40,7 @@ TOOL_KEYS: dict[str, PaletteTool] = {
     "5": "rect",
     "6": "ellipse",
     "7": "highlight",
+    "8": "text",
 }
 
 _PREVIEW_KINDS: dict[Tool, Literal["polyline", "line", "arrow", "rect", "ellipse"]] = {
@@ -100,6 +100,7 @@ class AnnotationPalette(tk.Toplevel):
         self.width_px: float = self._presets.widths[1]  # medium
         self.opacity: float = 1.0
         self.fill: bool = False
+        self.font_px: float = self._presets.fonts[1]  # medium
 
         # In-flight drag: accumulated image-space points, or None.
         self._drag_points: list[tuple[float, float]] | None = None
@@ -109,6 +110,16 @@ class AnnotationPalette(tk.Toplevel):
         # whether the 3-screen-px gate opened (a click with jitter ≠ a move).
         self._select_drag: tuple[tuple[float, float], Shape] | None = None
         self._select_moved = False
+
+        # Text-entry popup (None = closed): the Toplevel, its Entry, the
+        # image-space anchor of a NEW label, and the shape index being
+        # re-edited (None = placing a new label).
+        self._text_popup: tk.Toplevel | None = None
+        self._text_entry: tk.Entry | None = None
+        self._text_anchor: tuple[float, float] | None = None
+        self._text_edit_index: int | None = None
+        # One-shot hint when Pillow lacks the scalable embedded font.
+        self._font_hint_shown = False
 
         self._tool_var = tk.StringVar(value=self.tool)
         self._size_var = tk.StringVar(value="medium")
@@ -146,7 +157,7 @@ class AnnotationPalette(tk.Toplevel):
             ("5", "Rect", True),
             ("6", "Ellipse", True),
             ("7", "Highlight", True),
-            ("8", "Text", False),
+            ("8", "Text", True),
         ):
             btn = ttk.Radiobutton(
                 tools,
@@ -266,6 +277,13 @@ class AnnotationPalette(tk.Toplevel):
     def _on_size_selected(self) -> None:
         idx = {"thin": 0, "medium": 1, "thick": 2}[self._size_var.get()]
         self.width_px = self._presets.widths[idx]
+        self.font_px = self._presets.fonts[idx]
+        # Size presets double as text sizes (2026-06-10 design): a selected
+        # text label restyles its font_px, anything else its stroke width.
+        sel = self.layer.selected
+        if sel is not None and self.layer.shapes[sel].tool == "text":
+            self._restyle_selection(font_px=self.font_px)
+            return
         self._restyle_selection(width_px=self.width_px)
 
     def _on_fill_toggled(self) -> None:
@@ -316,6 +334,12 @@ class AnnotationPalette(tk.Toplevel):
             return
         if self.tool == "select":
             self._select_press(image_xy)
+            return
+        if self.tool == "text":
+            # A click opens the entry popup; a click on an EXISTING label
+            # starts a new overlapping label (re-editing is Select-double-click
+            # only, 2026-06-10 design). No drag state: text is a click.
+            self._open_text_popup(image_xy, edit_index=None)
             return
         # AIDEV-NOTE: Re-anchor to the current image if the session is empty and
         # the image was swapped since open — drawing on the new image is safe
@@ -429,6 +453,108 @@ class AnnotationPalette(tk.Toplevel):
             shape = self.layer.shapes[self.layer.selected]
             self.app.canvas_view.set_selection_marker(shape.bbox())
 
+    # --- text tool (key 8) --------------------------------------------------
+
+    def _open_text_popup(self, anchor_xy: tuple[float, float], edit_index: int | None) -> None:
+        """Open the text-entry popup at the image-space anchor point.
+
+        AIDEV-NOTE: An overrideredirect Toplevel parented to the PALETTE: the
+        Entry's bindtag chain is (entry, "Entry", popup, "all") — root is not
+        in it, so typing space/q/BackSpace can never fire the root-bound
+        shortcuts (2026-06-10 design), and parenting to the palette means a
+        palette destroy reaps a stray popup. Its screen position derives from
+        canvas coords that go stale on any view change, so every display
+        re-render cancels it (app._composite_annotations) instead of
+        repositioning.
+        """
+        self.cancel_text_popup()  # a second click replaces any open popup
+        if not self._font_hint_shown and not scalable_font_available():
+            # One-time hint: Pillow lacks FreeType, text renders bitmap-sized.
+            self._font_hint_shown = True
+            self.app.show_temp_title("pxv: no scalable font — text renders at a fixed size")
+        sx, sy = self.app.canvas_view.image_xy_to_screen(anchor_xy)
+        popup = tk.Toplevel(self)
+        popup.overrideredirect(True)
+        popup.geometry(f"+{sx}+{sy}")
+        entry = tk.Entry(popup, width=24)
+        entry.pack()
+        if edit_index is not None:
+            entry.insert(0, self.layer.shapes[edit_index].text)
+        # The handlers return "break": nothing may propagate past the Entry.
+        entry.bind("<Return>", self._on_text_popup_return)
+        entry.bind("<KP_Enter>", self._on_text_popup_return)
+        entry.bind("<Escape>", self._on_text_popup_escape)
+        entry.focus_set()
+        self._text_popup = popup
+        self._text_entry = entry
+        self._text_anchor = anchor_xy
+        self._text_edit_index = edit_index
+
+    def _on_text_popup_return(self, _event: object) -> str:
+        """Enter in the popup: place/edit the label (non-empty) or cancel (empty)."""
+        if self._text_entry is None or self._text_anchor is None:
+            return "break"
+        text = self._text_entry.get()
+        anchor = self._text_anchor
+        edit_index = self._text_edit_index
+        self.cancel_text_popup()
+        if not text.strip():
+            return "break"  # empty Enter cancels: no shape, no edit
+        if edit_index is not None:
+            # Select-double-click re-edit. AIDEV-NOTE: Guard against the label
+            # changing under the open popup (deleted via the canvas or the
+            # palette while the Entry held focus): a stale index drops the
+            # edit rather than touching the wrong shape.
+            shapes = self.layer.shapes
+            if edit_index >= len(shapes) or shapes[edit_index].tool != "text":
+                return "break"
+            self.layer.selected = edit_index
+            self.layer.replace_selected(replace(shapes[edit_index], text=text))
+            self._refresh_selection_marker()
+        else:
+            self.layer.add(
+                Shape(
+                    tool="text",
+                    points=(anchor,),
+                    color=self.color,
+                    width_px=self.width_px,
+                    opacity=self.opacity,
+                    text=text,
+                    font_px=self.font_px,
+                )
+            )
+            self.app.annotations_unsaved = True
+        self.app.refresh_display()
+        return "break"
+
+    def _on_text_popup_escape(self, _event: object) -> str:
+        """Escape in the popup: cancel with no shape and no edit."""
+        self.cancel_text_popup()
+        return "break"
+
+    def cancel_text_popup(self) -> None:
+        """Dismiss an open text popup, committing nothing (no-op when closed).
+
+        AIDEV-NOTE: The ONE dismissal path. Callers: a new text-tool click
+        (replace), Escape (on_escape and the popup's own binding), every
+        display re-render (app._composite_annotations — zoom/resize/restyle),
+        a wheel pan (on_view_scrolled — the one view change with no re-render
+        behind it), and _end_session (Done/Cancel/navigation/stale guard) —
+        the latter call sites land in the next task.
+        """
+        popup = self._text_popup
+        self._text_popup = None
+        self._text_entry = None
+        self._text_anchor = None
+        self._text_edit_index = None
+        if popup is not None and popup.winfo_exists():
+            popup.destroy()
+
+    def on_view_scrolled(self) -> None:
+        """Wheel pan: a view change that bypasses the display re-render
+        chokepoint — dismiss an open text popup (no-op otherwise)."""
+        self.cancel_text_popup()
+
     def render_display_overlay(self, target_size: tuple[int, int], scale: float) -> Image.Image:
         """The committed shapes rendered as an RGBA overlay at display size.
 
@@ -474,7 +600,7 @@ class AnnotationPalette(tk.Toplevel):
         self.app.refresh_display()
 
     def on_escape(self) -> None:
-        """Escape inside the mode: cancel a drag, else deselect, else nothing.
+        """Escape: dismiss the popup, else cancel a drag, else deselect, else nothing.
 
         AIDEV-NOTE: Never exits the mode (no accidental bakes) and never
         falls through to app.escape_action — leaving fullscreen during a
@@ -482,8 +608,14 @@ class AnnotationPalette(tk.Toplevel):
         motion events until the physical ButtonRelease (see on_release).
         A cancelled MOVE rolls back through layer.undo(): the move run is one
         coalesced undo state, so one undo restores the pre-move shape exactly
-        (the aborted move parks on the redo stack — accepted quirk).
+        (the aborted move parks on the redo stack — accepted quirk). The text
+        popup outranks everything: its own Escape binding covers the
+        focused-Entry case, and this branch covers Escape arriving from the
+        canvas or the palette while a popup is open.
         """
+        if self._text_popup is not None:
+            self.cancel_text_popup()
+            return
         if self._drag_points is not None:
             self._drag_points = None
             self._cancel_latch = True
@@ -539,13 +671,15 @@ class AnnotationPalette(tk.Toplevel):
 
         Disarms the canvas FIRST (the eyedropper _on_close pattern) so no
         event can reach a dying session, then destroys the window, keeping the
-        palette-open <=> mode-active invariant.
+        palette-open <=> mode-active invariant. An open text popup is
+        dismissed before anything else — uncommitted text is never baked.
         """
         # AIDEV-NOTE: Exactly-once latch — askyesno in _on_cancel spins a local
         # Tk event loop during which cancel_stale could call _end_session again.
         if self._ended:
             return
         self._ended = True
+        self.cancel_text_popup()
         self.app.canvas_view.set_annotation_session(None)
         shapes = self.layer.shapes
         stale = bake and bool(shapes) and not self.image_is_current()

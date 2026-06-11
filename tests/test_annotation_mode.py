@@ -41,6 +41,9 @@ class _RecordingSession:
     def on_release(self, image_xy: tuple[float, float]) -> None:
         self.events.append(("release", image_xy))
 
+    def on_view_scrolled(self) -> None:
+        pass
+
 
 def _canvas_view(root):  # noqa: ANN001, ANN202 - Tk fixture helper
     """A bare 300x300 CanvasView pretending to show a 100x100 image at zoom 1."""
@@ -406,7 +409,7 @@ def test_undo_keys_route_to_layer_while_open(tmp_path) -> None:  # noqa: ANN001
         root.destroy()
 
 
-def test_tool_keys_select_and_others_inert(tmp_path) -> None:  # noqa: ANN001
+def test_tool_keys_all_select(tmp_path) -> None:  # noqa: ANN001
     app, root, _ = _make_app(tmp_path)
     try:
         palette = _open_palette(app)
@@ -418,12 +421,13 @@ def test_tool_keys_select_and_others_inert(tmp_path) -> None:  # noqa: ANN001
             ("5", "rect"),
             ("6", "ellipse"),
             ("7", "highlight"),
+            ("8", "text"),
         ):
             palette.select_tool_key(char)
             assert palette.tool == tool
             assert palette._tool_var.get() == tool  # button row follows
-        palette.select_tool_key("8")  # text lands later in this phase: still inert
-        assert palette.tool == "highlight"
+        palette.select_tool_key("9")  # not a tool key: inert
+        assert palette.tool == "text"
         palette._end_session(bake=False)
     finally:
         root.destroy()
@@ -1211,6 +1215,245 @@ def test_fill_toggle_styles_new_rects_and_restyles_only_rect_ellipse(tmp_path) -
         palette._fill_var.set(False)
         palette._on_fill_toggled()
         assert palette.layer.shapes[0].fill is False
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_image_xy_to_screen_accounts_for_centering() -> None:
+    root = tk.Tk()
+    try:
+        view = _canvas_view(root)
+        sx, sy = view.image_xy_to_screen((50.0, 50.0))
+        # Image (50,50) -> canvas (150,150) via the centering offset; no scroll.
+        assert sx == view.canvas.winfo_rootx() + 150
+        assert sy == view.canvas.winfo_rooty() + 150
+    finally:
+        root.destroy()
+
+
+def test_text_click_opens_popup_and_return_places_label(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        assert palette.tool == "text"
+        palette.on_press((20.0, 30.0))
+        root.update()
+        assert palette._text_popup is not None and palette._text_popup.winfo_exists()
+        assert palette._text_popup.overrideredirect()  # undecorated, outside the WM
+        assert palette._text_edit_index is None
+        assert not palette.is_dragging  # a text click is a click, not a drag
+        entry = palette._text_entry
+        assert entry is not None
+        entry.insert(0, "hello")
+        assert palette._on_text_popup_return(types.SimpleNamespace()) == "break"
+        assert palette._text_popup is None
+        (shape,) = palette.layer.shapes
+        assert shape.tool == "text"
+        assert shape.points == ((20.0, 30.0),)  # top-left anchor at the click point
+        assert shape.text == "hello"
+        assert shape.font_px == palette.font_px
+        assert shape.color == palette.color and shape.opacity == palette.opacity
+        assert app.annotations_unsaved is True
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_text_popup_empty_enter_or_escape_cancels(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert palette._on_text_popup_return(types.SimpleNamespace()) == "break"
+        assert palette._text_popup is None
+        assert palette.layer.shapes == ()  # empty Enter: no shape
+        assert app.annotations_unsaved is False
+        palette.on_press((20.0, 30.0))
+        entry = palette._text_entry
+        assert entry is not None
+        entry.insert(0, "doomed")
+        assert palette._on_text_popup_escape(types.SimpleNamespace()) == "break"
+        assert palette._text_popup is None
+        assert palette.layer.shapes == ()  # Escape: typed text discarded
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_text_popup_is_outside_root_bindtag_chain(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path, count=2)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        entry = palette._text_entry
+        assert entry is not None
+        # The Entry's bindtag chain ends at the POPUP Toplevel, never root —
+        # typing space/q/BackSpace cannot fire the root-bound shortcuts.
+        assert str(root) not in entry.bindtags()
+        root.update()
+        entry.focus_force()
+        entry.event_generate("<space>")  # the next-image key, typed in the Entry
+        root.update()
+        assert app.file_list.index == 0  # never navigated
+        assert app.annotation_palette is palette  # session intact
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_text_click_on_existing_label_starts_a_new_label(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert palette._text_entry is not None
+        palette._text_entry.insert(0, "first")
+        palette._on_text_popup_return(types.SimpleNamespace())
+        # Click right on the placed label: a NEW empty popup, not a re-edit
+        # (re-editing is Select-double-click only, 2026-06-10 design).
+        palette.on_press((22.0, 32.0))
+        entry = palette._text_entry
+        assert entry is not None
+        assert entry.get() == "" and palette._text_edit_index is None
+        entry.insert(0, "second")
+        palette._on_text_popup_return(types.SimpleNamespace())
+        assert len(palette.layer.shapes) == 2
+        assert palette.layer.shapes[1].text == "second"
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_size_preset_restyles_selected_text_font(tmp_path) -> None:  # noqa: ANN001
+    from pxv.annotations import size_presets
+
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert palette._text_entry is not None
+        palette._text_entry.insert(0, "hi")
+        palette._on_text_popup_return(types.SimpleNamespace())
+        palette.select_tool_key("1")
+        palette.on_press((22.0, 32.0))
+        palette.on_release((22.0, 32.0))
+        assert palette.layer.selected == 0  # picked via the heuristic text bbox
+        palette._size_var.set("thick")
+        palette._on_size_selected()
+        presets = size_presets(100)  # image long side = 100
+        assert palette.layer.shapes[0].font_px == presets.fonts[2]  # large
+        assert palette.layer.shapes[0].width_px == 2.0  # stroke width untouched
+        assert palette.font_px == presets.fonts[2]  # new-label default follows
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_bitmap_font_hint_shown_once(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        monkeypatch.setattr("pxv.annotation_palette.scalable_font_available", lambda: False)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert "fixed size" in root.title()  # the one-time hint
+        assert palette._font_hint_shown is True
+        palette._on_text_popup_escape(types.SimpleNamespace())
+        app.root.title("pxv: sentinel")
+        palette.on_press((40.0, 30.0))  # second popup: hint NOT repeated
+        assert root.title() == "pxv: sentinel"
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_zoom_or_resize_render_cancels_open_text_popup(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert palette._text_popup is not None
+        commands.cmd_zoom_increase(app)  # not a drag: the zoom gate lets it through...
+        assert app.canvas_view.zoom != 1.0
+        assert palette._text_popup is None  # ...and the stale-positioned popup dies
+        assert palette.layer.shapes == ()  # uncommitted text never places a shape
+        palette.on_press((20.0, 30.0))
+        assert palette._text_popup is not None
+        app._update_display()  # the window-resize path shares the chokepoint
+        assert palette._text_popup is None
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_wheel_pan_cancels_open_text_popup(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert palette._text_popup is not None
+        # A wheel pan scrolls the canvas with NO re-render behind it, so the
+        # composite chokepoint never fires — the canvas notifies the session.
+        app.canvas_view._on_mouse_wheel(types.SimpleNamespace(num=4, delta=0, state=0))
+        assert palette._text_popup is None
+        assert palette.layer.shapes == ()  # uncommitted text never places a shape
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_end_session_paths_cancel_open_text_popup(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+        _draw_line(palette, y=10.0)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        assert palette._text_entry is not None
+        palette._text_entry.insert(0, "never placed")
+        popup = palette._text_popup
+        palette._on_done()  # Done bakes committed shapes; the popup just dies
+        assert app.annotation_palette is None
+        assert popup is not None and not popup.winfo_exists()
+        assert len(app.history._undo) == 1  # the line baked...
+        working = app.image_model.working_image
+        assert working is not None
+        assert working.getpixel((25, 10)) == (255, 0, 0)
+        assert working.getpixel((25, 35)) == (0, 0, 255)  # ...the typed text did not
+    finally:
+        root.destroy()
+
+
+def test_escape_cancels_popup_before_anything_else(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        assert palette.layer.selected == 0
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))  # opens a popup; selection untouched
+        assert palette._text_popup is not None
+        palette.on_escape()  # first Escape: ONLY the popup dies
+        assert palette._text_popup is None
+        assert palette.layer.selected == 0  # selection survives
+        palette.on_escape()  # second Escape: the deselect step
+        assert palette.layer.selected is None
+        assert app.annotation_palette is palette  # never exits the mode
         palette._end_session(bake=False)
     finally:
         root.destroy()
