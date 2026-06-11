@@ -392,17 +392,24 @@ class AnnotationPalette(tk.Toplevel):
     # --- in-mode keys --------------------------------------------------------
 
     def on_undo_key(self) -> None:
-        """In-mode undo entry point — every undo key/menu path lands here.
+        """In-mode undo — every undo entry point lands here while the mode is on.
 
-        AIDEV-NOTE: Phase 2 swallows the key with a hint: the layer's undo
-        stack exists (Phase 1) but editing ships with the Select tool in
-        Phase 3, which replaces this body with layer.undo() routing. It must
-        NEVER fall through to app history while the mode is active.
+        AIDEV-NOTE: u/Ctrl-z and the context-menu Undo funnel through
+        commands.cmd_undo (which routes here while the palette exists); the
+        palette's own key mirrors call this directly. When the layer stack is
+        empty the key is CONSUMED and does nothing — it must never fall
+        through to app history while the mode is active (2026-06-10 design).
+        layer.undo() clears the selection, so the marker is re-synced.
         """
-        self.app.show_temp_title("pxv: undo arrives with the Select tool")
+        if self.layer.undo():
+            self._refresh_selection_marker()
+            self.app.refresh_display()
 
     def on_redo_key(self) -> None:
-        self.app.show_temp_title("pxv: undo arrives with the Select tool")
+        """In-mode redo (see on_undo_key); consumed when the redo stack is empty."""
+        if self.layer.redo():
+            self._refresh_selection_marker()
+            self.app.refresh_display()
 
     def on_delete_key(self) -> None:
         """Delete the selected shape (selection ships in Phase 3; no-op now)."""

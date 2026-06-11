@@ -390,15 +390,17 @@ def test_cancel_prompts_then_discards(tmp_path, monkeypatch) -> None:  # noqa: A
         root.destroy()
 
 
-def test_undo_keys_swallowed_with_hint_while_open(tmp_path) -> None:  # noqa: ANN001
+def test_undo_keys_route_to_layer_while_open(tmp_path) -> None:  # noqa: ANN001
     app, root, _ = _make_app(tmp_path)
     try:
         palette = _open_palette(app)
         app.record_history()  # a fall-through to app history would be visible
-        palette.on_undo_key()
-        assert "Select tool" in root.title()
+        _draw_line(palette, y=10.0)
+        palette.on_undo_key()  # the palette key mirrors land here directly
+        assert palette.layer.shapes == ()
         palette.on_redo_key()
-        assert len(app.history._undo) == 1  # untouched
+        assert len(palette.layer.shapes) == 1
+        assert len(app.history._undo) == 1  # app history untouched
         palette._end_session(bake=False)
     finally:
         root.destroy()
@@ -644,16 +646,23 @@ def test_gated_commands_show_hint_and_do_nothing(tmp_path) -> None:  # noqa: ANN
         root.destroy()
 
 
-def test_undo_keys_route_to_palette_when_open_and_history_when_closed(tmp_path) -> None:  # noqa: ANN001
+def test_undo_entry_points_route_to_layer_and_consume_when_empty(tmp_path) -> None:  # noqa: ANN001
     app, root, _ = _make_app(tmp_path)
     try:
         app.record_history()
         commands.cmd_annotate(app)
-        commands.cmd_undo(app)  # all entry points funnel through cmd_undo/cmd_redo
-        assert "Select tool" in root.title()
-        commands.cmd_redo(app)
-        assert len(app.history._undo) == 1  # app history untouched while open
-        app.annotation_palette._on_done()  # empty layer: silent exit
+        palette = app.annotation_palette
+        assert palette is not None
+        _draw_line(palette, y=10.0)
+        commands.cmd_undo(app)  # u / Ctrl-z / context-menu Undo all call this
+        assert palette.layer.shapes == ()
+        commands.cmd_redo(app)  # Ctrl-y / Ctrl-Shift-Z / context-menu Redo
+        assert len(palette.layer.shapes) == 1
+        commands.cmd_undo(app)
+        commands.cmd_undo(app)  # layer stack empty: CONSUMED, not app history
+        assert len(app.history._undo) == 1
+        assert "nothing to undo" not in root.title()  # consumed silently
+        palette._end_session(bake=False)
         commands.cmd_undo(app)  # closed: routes to app history again
         assert len(app.history._undo) == 0
     finally:
@@ -1034,6 +1043,26 @@ def test_styling_controls_restyle_live_selection_coalesced(tmp_path) -> None:  #
         assert palette.layer.undo() is True  # ONE step: the whole restyle run
         (shape,) = palette.layer.shapes
         assert shape.color == "#ff0000" and shape.width_px == 2.0
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_undo_clears_selection_and_marker(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        assert app.canvas_view._marker_id is not None
+        palette.on_undo_key()  # pops the add: shape gone, selection cleared
+        assert palette.layer.shapes == () and palette.layer.selected is None
+        assert app.canvas_view._marker_id is None
+        palette.on_redo_key()  # restored WITHOUT a selection (layer semantics)
+        assert len(palette.layer.shapes) == 1 and palette.layer.selected is None
+        assert app.canvas_view._marker_id is None
         palette._end_session(bake=False)
     finally:
         root.destroy()
