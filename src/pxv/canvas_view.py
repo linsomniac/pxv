@@ -10,8 +10,8 @@ space for crop operations, accounting for the centering offset and zoom factor.
 from __future__ import annotations
 
 import tkinter as tk
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from PIL import ImageTk
 
@@ -118,6 +118,26 @@ def image_xy_to_canvas_point(
     return (ix * zoom + (area_w - disp_w) / 2, iy * zoom + (area_h - disp_h) / 2)
 
 
+class AnnotationSession(Protocol):
+    """What CanvasView needs from the draw-mode session (the palette).
+
+    AIDEV-NOTE: A Protocol instead of importing AnnotationPalette — the
+    palette already depends on the app, which owns this view, so a real import
+    would be circular. The full session protocol additionally includes
+    render_display_overlay(target_size, scale), which the APP consumes in its
+    display-composite hook, not this view.
+    """
+
+    @property
+    def is_dragging(self) -> bool: ...
+
+    def on_press(self, image_xy: tuple[float, float]) -> None: ...
+
+    def on_drag(self, image_xy: tuple[float, float]) -> None: ...
+
+    def on_release(self, image_xy: tuple[float, float]) -> None: ...
+
+
 class CanvasView:
     """Canvas widget that displays an image with rubber-band selection and zoom."""
 
@@ -151,6 +171,12 @@ class CanvasView:
         # One-shot eyedropper pick mode (None = normal rubber-band behavior).
         self._pick_callback: Callable[[tuple[int, int] | None], None] | None = None
         self._pick_working_size: tuple[int, int] | None = None
+
+        # Draw-mode session (None = normal behavior). While set, mouse events
+        # forward image-space float coords to it instead of the rubber band.
+        self._annotation_session: AnnotationSession | None = None
+        # The single transient drag-preview item (draw mode).
+        self._preview_id: int | None = None
 
         self._bind_mouse()
 
@@ -260,6 +286,84 @@ class CanvasView:
         self._pick_working_size = working_size
         self.canvas.config(cursor="tcross" if callback is not None else "crosshair")
 
+    def set_annotation_session(self, session: AnnotationSession | None) -> None:
+        """Arm (or disarm with None) draw-mode event forwarding.
+
+        AIDEV-NOTE: Entering clears any rubber-band selection (selection
+        handling is suspended for the whole session) and shows the pencil
+        cursor — the canvas is already crosshair normally, so the mode is
+        visually distinct. Disarming clears the transient preview item; the
+        palette calls this FIRST in _end_session (the eyedropper _on_close
+        pattern), so no event can reach a dying session.
+        """
+        self._annotation_session = session
+        if session is not None:
+            self.clear_selection()
+            self.canvas.config(cursor="pencil")
+        else:
+            self.clear_preview()
+            self.canvas.config(cursor="crosshair")
+
+    def _event_image_xy(self, event: tk.Event) -> tuple[float, float]:
+        """Per-event canvas->image conversion for the annotation session.
+
+        Scroll-aware, float precision, UNCLAMPED — out-of-image points pass
+        through; clipping happens at render time (2026-06-10 design).
+        """
+        cx = self.canvas.canvasx(event.x)  # type: ignore[no-untyped-call]
+        cy = self.canvas.canvasy(event.y)  # type: ignore[no-untyped-call]
+        return canvas_point_to_image_xy_f(
+            (float(cx), float(cy)),
+            (self._display_width, self._display_height),
+            (self.canvas.winfo_width(), self.canvas.winfo_height()),
+            self.zoom,
+        )
+
+    def set_preview_shape(
+        self,
+        kind: Literal["polyline", "line", "arrow", "rect", "ellipse"],
+        points: Sequence[tuple[float, float]],
+        color: str,
+        width_px: float,
+    ) -> None:
+        """Draw/replace the single transient drag-preview Tk item.
+
+        AIDEV-NOTE: points are IMAGE-space floats (the session's source of
+        truth), converted through image_xy_to_canvas_point HERE so callers
+        never hold canvas coords (which go stale on zoom/pan/resize). Only the
+        in-flight drag uses a Tk item — Tk items cannot do per-item alpha —
+        and it is swapped for the exact PIL render at release.
+        """
+        self.clear_preview()
+        disp = (self._display_width, self._display_height)
+        csize = (self.canvas.winfo_width(), self.canvas.winfo_height())
+        pts = [image_xy_to_canvas_point(p, disp, csize, self.zoom) for p in points]
+        if len(pts) == 1:
+            pts = pts * 2  # create_line needs two points; a click previews a dot
+        flat = [coord for point in pts for coord in point]
+        width = max(1, round(width_px * self.zoom))
+        if kind in ("polyline", "line", "arrow"):
+            # Head sized to mirror annotation_render.arrow_head's length rule.
+            head = max(3.0 * width_px, 8.0) * self.zoom
+            arrow: Literal["last", ""] = "last" if kind == "arrow" else ""
+            self._preview_id = self.canvas.create_line(
+                flat,
+                fill=color,
+                width=width,
+                arrow=arrow,  # type: ignore[arg-type]
+                arrowshape=(head, head, head / 2),
+            )
+        elif kind == "rect":
+            self._preview_id = self.canvas.create_rectangle(flat, outline=color, width=width)
+        else:
+            self._preview_id = self.canvas.create_oval(flat, outline=color, width=width)
+
+    def clear_preview(self) -> None:
+        """Remove the transient drag-preview item, if any."""
+        if self._preview_id is not None:
+            self.canvas.delete(self._preview_id)
+            self._preview_id = None
+
     def zoom_normal(self) -> None:
         self.zoom = 1.0
 
@@ -303,6 +407,13 @@ class CanvasView:
         # PxvApp.restore_main_focus). A real click means the main window is
         # gaining focus anyway, so cooperative focus_set suffices here.
         self.canvas.focus_set()
+        # AIDEV-NOTE: Draw mode multiplexes ahead of pick mode and the rubber
+        # band — the session consumes the whole press/drag/release stream.
+        # cmd_annotate and cmd_enhancement_dialog gate each other, so pick
+        # mode and a session can never be armed at once.
+        if self._annotation_session is not None:
+            self._annotation_session.on_press(self._event_image_xy(event))
+            return
         # AIDEV-NOTE: Pick mode consumes this click entirely — no rubber band,
         # one shot, then auto-disarm (cursor restored) before delivering,
         # coords via _canvas_xy so picks stay correct on a scrolled view.
@@ -322,6 +433,9 @@ class CanvasView:
         self._rb_start = self._canvas_xy(event)
 
     def _on_drag(self, event: tk.Event) -> None:
+        if self._annotation_session is not None:
+            self._annotation_session.on_drag(self._event_image_xy(event))
+            return
         if self._rb_start is None:
             return
         x0, y0 = self._rb_start
@@ -334,6 +448,9 @@ class CanvasView:
             self.canvas.coords(self._rubber_band_id, x0, y0, x1, y1)
 
     def _on_release(self, event: tk.Event) -> None:
+        if self._annotation_session is not None:
+            self._annotation_session.on_release(self._event_image_xy(event))
+            return
         if self._rb_start is None:
             return
         x0, y0 = self._rb_start
@@ -350,6 +467,12 @@ class CanvasView:
 
     def _on_mouse_wheel(self, event: tk.Event) -> str | None:
         """Pan the view with the scroll wheel (Shift = horizontal)."""
+        # AIDEV-NOTE: The wheel is pxv's only pan input; a view change mid-drag
+        # would shear the stroke, so wheel events are ignored while an
+        # annotation drag is in flight (zoom KEYS are consumed in commands.py;
+        # per-event coordinate conversion remains as defense in depth).
+        if self._annotation_session is not None and self._annotation_session.is_dragging:
+            return "break"
         num = getattr(event, "num", 0)
         if num == 4:  # X11 scroll up
             delta = -1
