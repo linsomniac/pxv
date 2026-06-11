@@ -120,6 +120,8 @@ def _rgba_to_gif(img: Image.Image) -> tuple[Image.Image, dict[str, object]]:
 
 def cmd_open(app: PxvApp) -> None:
     """Open a file via dialog, add to file list, and display."""
+    if not annotation_gate(app, "navigate"):
+        return
     initial_dir = None
     if app.image_model.current_path is not None:
         initial_dir = str(app.image_model.current_path.parent)
@@ -153,12 +155,17 @@ def _exif_for_save(model: "ImageModel", fmt: str) -> bytes | None:
     return None
 
 
-def cmd_save_as(app: PxvApp) -> None:
-    """Save the enhanced image via Save As dialog."""
+def cmd_save_as(app: PxvApp) -> bool:
+    """Save the enhanced image via Save As dialog.
+
+    Returns True only when a file was actually written — cancel (either
+    dialog), failure, and the draw-mode gate all return False, so the
+    annotations_unsaved flag survives everything short of a real save.
+    """
     if not annotation_gate(app, "mutate"):
-        return
+        return False
     if app.image_model.working_image is None:
-        return
+        return False
 
     initial_dir = None
     initial_file = ""
@@ -173,7 +180,7 @@ def cmd_save_as(app: PxvApp) -> None:
         initialfile=initial_file,
     )
     if not path:
-        return
+        return False
 
     fmt, path = _resolve_save_format(path)
 
@@ -187,7 +194,7 @@ def cmd_save_as(app: PxvApp) -> None:
             app.root, fmt, app.save_options, app.image_model.keep_metadata, keep_supported
         )
         if chosen is None:
-            return
+            return False
         app.save_options, app.image_model.keep_metadata = chosen
         # Keep the Info dialog's "Keep metadata" checkbox in sync.
         if app.info_dialog is not None:
@@ -207,7 +214,7 @@ def cmd_save_as(app: PxvApp) -> None:
         app.enhancement_params, preserve_alpha=preserve_alpha
     )
     if save_img is None:
-        return
+        return False
 
     if fmt == "GIF" and save_img.mode == "RGBA":
         save_img, gif_kwargs = _rgba_to_gif(save_img)
@@ -217,6 +224,12 @@ def cmd_save_as(app: PxvApp) -> None:
         save_img.save(path, format=fmt, **save_kwargs)
     except Exception as e:
         messagebox.showerror("Save Error", f"Could not save image:\n{e}")
+        return False
+    # AIDEV-NOTE: A successful save clears the annotation dirty flag (the
+    # 2026-06-10 lifecycle); the bool return exists because None-on-everything
+    # could not distinguish a cancelled dialog from a written file.
+    app.annotations_unsaved = False
+    return True
 
 
 def cmd_crop(app: PxvApp) -> None:
@@ -448,6 +461,8 @@ def cmd_redo(app: PxvApp) -> None:
 
 
 def cmd_next_image(app: PxvApp) -> None:
+    if not annotation_gate(app, "navigate"):
+        return
     # AIDEV-NOTE: Roll the cursor back if the load fails (corrupt/unreadable file),
     # so the file-list position stays in sync with the still-displayed image.
     prev_index = app.file_list.index
@@ -456,6 +471,8 @@ def cmd_next_image(app: PxvApp) -> None:
 
 
 def cmd_prev_image(app: PxvApp) -> None:
+    if not annotation_gate(app, "navigate"):
+        return
     prev_index = app.file_list.index
     if app.file_list.prev() is not None and not app.load_current():
         app.file_list.index = prev_index
@@ -479,6 +496,8 @@ def cmd_show_index(app: PxvApp, index: int) -> None:
     load_current() itself re-syncs the highlight (the grid<-viewer direction), so
     this only re-syncs on the rollback path.
     """
+    if not annotation_gate(app, "navigate"):
+        return
     if not (0 <= index < app.file_list.count()):
         return
     prev_index = app.file_list.index
@@ -563,6 +582,8 @@ def cmd_toggle_fullscreen(app: PxvApp) -> None:
 
 def cmd_toggle_slideshow(app: PxvApp) -> None:
     """Start or stop the auto-advance slideshow."""
+    if not annotation_gate(app, "navigate"):
+        return
     app.toggle_slideshow()
 
 
@@ -610,6 +631,8 @@ def cmd_about(app: PxvApp) -> None:
 
 
 def cmd_quit(app: PxvApp) -> None:
+    if not annotation_gate(app, "navigate"):
+        return
     # AIDEV-NOTE: Close the thumbnail browser first if open, so its pending loader/
     # reflow after() timers are cancelled before the interpreter is torn down
     # (otherwise a mid-load quit emits "invalid command name" noise on stderr).

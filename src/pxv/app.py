@@ -152,6 +152,9 @@ class PxvApp:
 
         self._bind_keys()
         self._bind_configure()
+        # AIDEV-NOTE: The titlebar close button otherwise bypasses cmd_quit —
+        # and with it the unsaved-annotations prompt — entirely.
+        root.protocol("WM_DELETE_WINDOW", lambda: commands.cmd_quit(self))
 
     def _get_decoration_size(self) -> tuple[int, int]:
         """Measure window decoration overhead (borders + title bar).

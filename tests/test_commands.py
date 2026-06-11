@@ -17,7 +17,13 @@ def _stub_app(n: int, *, load_ok: bool) -> tuple[SimpleNamespace, list[int]]:
         loaded.append(fl.index)
         return load_ok
 
-    app = SimpleNamespace(file_list=fl, browser=None, load_current=load_current)
+    app = SimpleNamespace(
+        file_list=fl,
+        browser=None,
+        load_current=load_current,
+        annotation_palette=None,
+        annotations_unsaved=False,
+    )
     return app, loaded
 
 
@@ -121,3 +127,26 @@ def test_gate_navigate_clears_post_bake_flag_without_session(monkeypatch: object
     app = _gate_app(palette=None, unsaved=True)  # baked, then closed the palette
     assert commands.annotation_gate(app, "navigate") is True
     assert app.annotations_unsaved is False  # no re-prompt on the next image
+
+
+def test_cmd_open_consumed_during_annotation_drag() -> None:
+    app = SimpleNamespace(
+        annotation_palette=_StubPalette(dragging=True), annotations_unsaved=False
+    )
+    # Must return before touching the file dialog — calling it headless would raise.
+    commands.cmd_open(app)
+
+
+def test_cmd_show_index_prompts_through_the_gate(monkeypatch: object) -> None:
+    prompts: list[bool] = []
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        commands,
+        "messagebox",
+        SimpleNamespace(askyesno=lambda *a, **k: prompts.append(True) or True),
+    )
+    app, loaded = _stub_app(3, load_ok=True)
+    app.annotations_unsaved = True  # the Visual Schnauzer activation path is gated too
+    commands.cmd_show_index(app, 2)
+    assert prompts == [True]
+    assert app.annotations_unsaved is False
+    assert loaded == [2]

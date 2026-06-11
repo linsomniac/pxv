@@ -682,3 +682,107 @@ def test_zoom_consumed_during_drag_and_escape_never_leaves_mode(tmp_path) -> Non
         palette._end_session(bake=False)  # not _on_cancel: one shape committed -> it would prompt
     finally:
         root.destroy()
+
+
+def test_scale_only_invalidates_overlay_cache(tmp_path) -> None:  # noqa: ANN001
+    """Same target_size, different scale -> different overlay object (Step 0)."""
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette)
+        o1 = palette.render_display_overlay((100, 80), 1.0)
+        assert palette.render_display_overlay((100, 80), 2.0) is not o1
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_navigation_prompts_discard_and_cancels_session(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path, count=2)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        _draw_line(palette)
+        monkeypatch.setattr(
+            commands, "messagebox", types.SimpleNamespace(askyesno=lambda *a, **k: False)
+        )
+        commands.cmd_next_image(app)  # declined: fully consumed
+        assert app.file_list.index == 0
+        assert app.annotation_palette is palette and palette.winfo_exists()
+        monkeypatch.setattr(
+            commands, "messagebox", types.SimpleNamespace(askyesno=lambda *a, **k: True)
+        )
+        commands.cmd_next_image(app)  # confirmed: session cancelled, then proceed
+        assert app.file_list.index == 1
+        assert app.annotation_palette is None
+        assert app.annotations_unsaved is False
+        assert not app.history.can_undo  # cancelled, never baked
+    finally:
+        root.destroy()
+
+
+def test_bake_navigate_confirm_then_navigate_does_not_reprompt(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path, count=3)
+    try:
+        commands.cmd_annotate(app)
+        _draw_line(app.annotation_palette)
+        app.annotation_palette._on_done()  # bake sets annotations_unsaved
+        prompts: list[bool] = []
+        monkeypatch.setattr(
+            commands,
+            "messagebox",
+            types.SimpleNamespace(askyesno=lambda *a, **k: prompts.append(True) or True),
+        )
+        commands.cmd_next_image(app)
+        assert prompts == [True] and app.file_list.index == 1
+        commands.cmd_next_image(app)  # flag cleared on confirm + load_current
+        assert prompts == [True] and app.file_list.index == 2  # NO re-prompt
+    finally:
+        root.destroy()
+
+
+def test_save_success_clears_flag_but_cancelled_dialog_keeps_it(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_annotate(app)
+        _draw_line(app.annotation_palette)
+        app.annotation_palette._on_done()
+        assert app.annotations_unsaved is True
+        # Cancelled Save As dialog: the flag must survive.
+        monkeypatch.setattr(
+            commands, "filedialog", types.SimpleNamespace(asksaveasfilename=lambda **k: "")
+        )
+        assert commands.cmd_save_as(app) is False
+        assert app.annotations_unsaved is True
+        # Real save (BMP: no options dialog in the way) clears it.
+        out = tmp_path / "out.bmp"
+        monkeypatch.setattr(
+            commands, "filedialog", types.SimpleNamespace(asksaveasfilename=lambda **k: str(out))
+        )
+        assert commands.cmd_save_as(app) is True
+        assert out.exists()
+        assert app.annotations_unsaved is False
+    finally:
+        root.destroy()
+
+
+def test_quit_prompts_when_annotations_unsaved(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        assert root.protocol("WM_DELETE_WINDOW")  # titlebar close routes via cmd_quit
+        commands.cmd_annotate(app)
+        _draw_line(app.annotation_palette)
+        destroyed: list[bool] = []
+        monkeypatch.setattr(app.root, "destroy", lambda: destroyed.append(True))
+        monkeypatch.setattr(
+            commands, "messagebox", types.SimpleNamespace(askyesno=lambda *a, **k: False)
+        )
+        commands.cmd_quit(app)  # declined: still running, session intact
+        assert destroyed == [] and app.annotation_palette is not None
+        monkeypatch.setattr(
+            commands, "messagebox", types.SimpleNamespace(askyesno=lambda *a, **k: True)
+        )
+        commands.cmd_quit(app)
+        assert destroyed == [True]
+    finally:
+        root.destroy()
