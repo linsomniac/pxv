@@ -28,6 +28,8 @@ from pxv.thumbnails import ThumbnailCache
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from PIL import Image
+
     from pxv.annotation_palette import AnnotationPalette
     from pxv.annotations import Shape
     from pxv.enhancement_dialog import EnhancementDialog
@@ -411,6 +413,27 @@ class PxvApp:
         """
         return EnhancementParams() if self._compare_active else self.enhancement_params
 
+    def _composite_annotations(self, display_img: Image.Image | None) -> Image.Image | None:
+        """Composite the live annotation overlay onto a fresh display render.
+
+        AIDEV-NOTE: The ONE composite hook shared by refresh_display and
+        _update_display — without the resize path, shapes would vanish on
+        window resize. Only the rendered overlay is cached (in the palette,
+        keyed on (layer.revision, display size)); the composite happens fresh
+        every call because the base changes under the same key (enhancement
+        debounce, Compare, background toggle). Also the stale-image guard's
+        first checkpoint: never composite against a replaced image.
+        """
+        palette = self.annotation_palette
+        if display_img is None or palette is None or not palette.layer.shapes:
+            return display_img
+        if not palette.image_is_current():
+            palette.cancel_stale()  # tears down + refreshes; skip the overlay
+            return display_img
+        overlay = palette.render_display_overlay(display_img.size, self.canvas_view.zoom)
+        display_img.paste(overlay, (0, 0), overlay)
+        return display_img
+
     def refresh_display(self) -> None:
         """Re-render the image with current zoom and enhancement params."""
         display_img = self.image_model.get_display_image(
@@ -418,6 +441,7 @@ class PxvApp:
             params=self._active_params(),
             bg_color=self._bg_color(),
         )
+        display_img = self._composite_annotations(display_img)
         if display_img is not None:
             # AIDEV-NOTE: Resize window BEFORE display() so the canvas has correct
             # dimensions when centering the image. Skipped in fullscreen, where the
@@ -449,6 +473,7 @@ class PxvApp:
             params=self._active_params(),
             bg_color=self._bg_color(),
         )
+        display_img = self._composite_annotations(display_img)
         if display_img is not None:
             self.canvas_view.display(display_img)
         if self.enhancement_dialog is not None:
@@ -456,6 +481,13 @@ class PxvApp:
         self._update_title()
 
     def _update_title(self) -> None:
+        # AIDEV-NOTE: Skip if a temp title is in flight (show_temp_title set
+        # _status_after_id). This lets stale-image cancel_stale() call
+        # show_temp_title BEFORE the outer refresh_display's trailing
+        # _update_title fires — without this guard the outer call would
+        # overwrite the stale message (2026-06-10 design).
+        if self._status_after_id is not None:
+            return
         path = self.image_model.current_path
         if path is not None:
             name = path.name

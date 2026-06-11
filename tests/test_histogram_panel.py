@@ -121,10 +121,13 @@ def _refresh_double(
         _bg_color=lambda: (0, 0, 0),
         _update_title=lambda: None,
         _compare_active=False,
+        annotation_palette=None,  # draw mode not active in this double
+        _status_after_id=None,
     )
     from pxv.app import PxvApp
 
     app._active_params = types.MethodType(PxvApp._active_params, app)
+    app._composite_annotations = types.MethodType(PxvApp._composite_annotations, app)
     app.received_params = received_params
     return app, received
 

@@ -322,12 +322,15 @@ class AnnotationPalette(tk.Toplevel):
     def cancel_stale(self) -> None:
         """Guard trip from the composite hook: discard the session, no prompt.
 
-        AIDEV-NOTE: The guard trips INSIDE a display path; the OUTER
-        refresh's trailing _update_title would clobber an immediate temp
-        title, so the message is deferred until that render completes.
+        AIDEV-NOTE: show_temp_title is called BEFORE _end_session (which
+        calls refresh_display -> _update_title). _update_title skips its
+        root.title() call while _status_after_id is set, so the stale
+        message survives the trailing _update_title in the outer display
+        path (2026-06-10 design). Without this ordering the outer
+        _update_title would overwrite the stale message.
         """
+        self.app.show_temp_title(_STALE_MESSAGE)
         self._end_session(bake=False)
-        self.app.root.after_idle(lambda: self.app.show_temp_title(_STALE_MESSAGE))
 
     def _on_done(self) -> None:
         self._end_session(bake=True)
@@ -353,6 +356,11 @@ class AnnotationPalette(tk.Toplevel):
         if stale:
             # Stale-image guard at bake start: never bake against the wrong image.
             bake = False
+            # AIDEV-NOTE: show_temp_title BEFORE refresh_display so _status_after_id
+            # is set when _update_title runs inside refresh_display; _update_title
+            # skips its root.title() call while a temp title is in flight, keeping
+            # the stale message visible (2026-06-10 design).
+            self.app.show_temp_title(_STALE_MESSAGE)
         self.app.annotation_palette = None
         self.destroy()
         self.app.restore_main_focus()
@@ -361,7 +369,3 @@ class AnnotationPalette(tk.Toplevel):
         else:
             # Drop the composited overlay (and any preview) from the screen.
             self.app.refresh_display()
-        if stale:
-            # AIDEV-NOTE: AFTER the refresh — _update_title at the end of the
-            # display paths would clobber an earlier temp title.
-            self.app.show_temp_title(_STALE_MESSAGE)

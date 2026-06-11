@@ -441,3 +441,71 @@ def test_color_and_size_controls_style_new_shapes(tmp_path) -> None:  # noqa: AN
         palette._end_session(bake=False)
     finally:
         root.destroy()
+
+
+def test_overlay_composites_in_both_display_paths(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette)
+        shown: list[Image.Image] = []
+        monkeypatch.setattr(app.canvas_view, "display", shown.append)
+        app.refresh_display()
+        assert shown[-1].getpixel((25, 10)) == (255, 0, 0)  # overlay on the preview
+        shown.clear()
+        app._update_display()  # the window-resize path: same shared hook
+        assert shown[-1].getpixel((25, 10)) == (255, 0, 0)
+        assert shown[-1].getpixel((25, 40)) == (0, 0, 255)  # base shows elsewhere
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_overlay_cache_keyed_on_revision_and_size(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette)
+        o1 = palette.render_display_overlay((100, 80), 1.0)
+        assert palette.render_display_overlay((100, 80), 1.0) is o1  # cache hit
+        o2 = palette.render_display_overlay((50, 40), 0.5)  # zoom change: new size
+        assert o2 is not o1 and o2.size == (50, 40)
+        _draw_line(palette, y=30.0)  # layer.revision bump invalidates
+        assert palette.render_display_overlay((50, 40), 0.5) is not o2
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_stale_image_guard_cancels_session_at_composite(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette)
+        # An unguarded surprise replaces the image under the session:
+        app.image_model.working_image = Image.new("RGB", (100, 80), (9, 9, 9))
+        app.refresh_display()
+        root.update()  # flush the deferred stale-message after_idle
+        assert app.annotation_palette is None  # guard tore the session down
+        assert not palette.winfo_exists()
+        assert "image changed" in root.title()
+        assert not app.history.can_undo  # and nothing was baked
+    finally:
+        root.destroy()
+
+
+def test_stale_image_guard_blocks_bake_at_done(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette)
+        app.image_model.working_image = Image.new("RGB", (100, 80), (9, 9, 9))
+        palette._on_done()
+        assert app.annotation_palette is None
+        assert not app.history.can_undo
+        working = app.image_model.working_image
+        assert working is not None
+        assert working.getpixel((25, 10)) == (9, 9, 9)  # never baked the wrong image
+        assert "image changed" in root.title()
+    finally:
+        root.destroy()
