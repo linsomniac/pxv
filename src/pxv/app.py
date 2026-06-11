@@ -192,6 +192,11 @@ class PxvApp:
         self.root.bind("<less>", lambda _: commands.cmd_zoom_halve(self))
         self.root.bind("<Key-M>", lambda _: commands.cmd_zoom_max(self))
         self.root.bind("<Key-D>", lambda _: commands.cmd_toggle_background(self))
+        self.root.bind("<Key-d>", lambda _: commands.cmd_annotate(self))
+        # AIDEV-NOTE: 1-8 select drawing tools, gated to draw-mode-active here
+        # (the palette mirrors them for when IT holds focus); inert otherwise.
+        for digit in "12345678":
+            self.root.bind(f"<Key-{digit}>", self._on_tool_key)
         self.root.bind("<Key-t>", lambda _: commands.cmd_rotate(self, 270))
         self.root.bind("<Key-T>", lambda _: commands.cmd_rotate(self, 90))
         self.root.bind("<Control-s>", lambda _: commands.cmd_save_as(self))
@@ -214,6 +219,11 @@ class PxvApp:
     def _bind_configure(self) -> None:
         """Debounced handler for window resize events."""
         self.canvas_view.canvas.bind("<Configure>", self._on_configure)
+
+    def _on_tool_key(self, event: tk.Event) -> None:
+        """Root-level tool hotkeys (1-8): forwarded only while draw mode is active."""
+        if self.annotation_palette is not None:
+            self.annotation_palette.select_tool_key(event.char)
 
     def _on_configure(self, _event: tk.Event) -> None:
         if self._resizing_programmatically:

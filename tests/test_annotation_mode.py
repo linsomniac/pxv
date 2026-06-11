@@ -12,6 +12,8 @@ import types
 import pytest
 from PIL import Image
 
+from pxv import commands
+
 tk = pytest.importorskip("tkinter")
 
 pytestmark = pytest.mark.skipif(
@@ -549,5 +551,75 @@ def test_stale_guard_fires_through_update_display_path(tmp_path) -> None:  # noq
         app._update_display()
         assert app.annotation_palette is None
         assert not palette.winfo_exists()
+    finally:
+        root.destroy()
+
+
+def test_cmd_annotate_opens_then_raises_never_closes(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_annotate(app)
+        palette = app.annotation_palette
+        assert palette is not None
+        assert app.canvas_view._annotation_session is palette
+        commands.cmd_annotate(app)  # `d` again: raise + focus, never close or bake
+        assert app.annotation_palette is palette and palette.winfo_exists()
+        assert not app.history.can_undo
+        palette._on_done()
+    finally:
+        root.destroy()
+
+
+def test_cmd_annotate_without_image_is_noop() -> None:
+    from pxv.app import PxvApp
+    from pxv.file_list import FileList
+
+    root = tk.Tk()
+    try:
+        app = PxvApp(root, FileList([]))
+        commands.cmd_annotate(app)
+        assert app.annotation_palette is None
+    finally:
+        root.destroy()
+
+
+def test_cmd_annotate_gated_while_enhance_dialog_open(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        commands.cmd_enhancement_dialog(app)
+        assert app.enhancement_dialog is not None
+        commands.cmd_annotate(app)
+        assert app.annotation_palette is None  # pick mode and draw mode never coexist
+        assert "Enhancements" in root.title()
+        app.enhancement_dialog._on_close()
+        commands.cmd_annotate(app)
+        assert app.annotation_palette is not None
+        app.annotation_palette._on_done()
+    finally:
+        root.destroy()
+
+
+def test_cmd_annotate_stops_active_slideshow(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path, count=2)
+    try:
+        app.start_slideshow()
+        assert app.slideshow_active
+        commands.cmd_annotate(app)
+        assert not app.slideshow_active
+        assert app.annotation_palette is not None
+        app.annotation_palette._on_done()
+    finally:
+        root.destroy()
+
+
+def test_root_tool_keys_route_to_palette_when_open(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        app._on_tool_key(types.SimpleNamespace(char="4"))  # closed: inert
+        commands.cmd_annotate(app)
+        app._on_tool_key(types.SimpleNamespace(char="4"))
+        assert app.annotation_palette is not None
+        assert app.annotation_palette.tool == "arrow"
+        app.annotation_palette._on_done()
     finally:
         root.destroy()

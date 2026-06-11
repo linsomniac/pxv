@@ -450,6 +450,35 @@ def cmd_enhancement_dialog(app: PxvApp) -> None:
     app.refresh_display()
 
 
+def cmd_annotate(app: PxvApp) -> None:
+    """Open the drawing palette (draw mode), or raise/focus it if already open.
+
+    AIDEV-NOTE: `d` with the palette open never closes or bakes — it raises
+    and focuses (the enhancement-dialog precedent). Draw mode and the Enhance
+    dialog gate each other so eyedropper pick mode and the drawing session
+    can never share the canvas. Opening stops an active slideshow.
+    """
+    if app.annotation_palette is not None:
+        try:
+            app.annotation_palette.deiconify()
+            app.annotation_palette.lift()
+            app.annotation_palette.focus_set()
+            return
+        except Exception:
+            app.annotation_palette = None
+
+    if app.image_model.working_image is None:
+        return
+    if app.enhancement_dialog is not None:
+        app.show_temp_title("pxv: close the Enhancements dialog first")
+        return
+
+    from pxv.annotation_palette import AnnotationPalette
+
+    app.stop_slideshow()  # a safe no-op when not running
+    app.annotation_palette = AnnotationPalette(app)
+
+
 def cmd_toggle_fullscreen(app: PxvApp) -> None:
     """Toggle borderless fullscreen presentation mode."""
     app.toggle_fullscreen()
