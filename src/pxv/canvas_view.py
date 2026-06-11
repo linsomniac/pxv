@@ -78,6 +78,46 @@ def canvas_point_to_image_xy(
     return (ix, iy)
 
 
+def canvas_point_to_image_xy_f(
+    point: tuple[float, float],
+    display_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+    zoom: float,
+) -> tuple[float, float]:
+    """Map a canvas-space point to UNCLAMPED float image coords (no None case).
+
+    AIDEV-NOTE: The annotation session's converter (2026-06-10 design) — same
+    centering/zoom math as canvas_point_to_image_xy, but float precision, no
+    truncation, and out-of-image points pass through unclamped (clipping
+    happens at render time), so it needs no working_size parameter.
+    """
+    x, y = point
+    disp_w, disp_h = display_size
+    canvas_w, canvas_h = canvas_size
+    area_w = max(canvas_w, disp_w)
+    area_h = max(canvas_h, disp_h)
+    return ((x - (area_w - disp_w) / 2) / zoom, (y - (area_h - disp_h) / 2) / zoom)
+
+
+def image_xy_to_canvas_point(
+    xy: tuple[float, float],
+    display_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+    zoom: float,
+) -> tuple[float, float]:
+    """Inverse of canvas_point_to_image_xy_f: image coords -> canvas coords.
+
+    Used to (re-)derive transient Tk items (drag preview, selection marker)
+    from image-space truth after any zoom/pan/resize.
+    """
+    ix, iy = xy
+    disp_w, disp_h = display_size
+    canvas_w, canvas_h = canvas_size
+    area_w = max(canvas_w, disp_w)
+    area_h = max(canvas_h, disp_h)
+    return (ix * zoom + (area_w - disp_w) / 2, iy * zoom + (area_h - disp_h) / 2)
+
+
 class CanvasView:
     """Canvas widget that displays an image with rubber-band selection and zoom."""
 
