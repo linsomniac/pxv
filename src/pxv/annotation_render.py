@@ -119,6 +119,9 @@ def render_overlay(
 def _draw_shape(draw: ImageDraw.ImageDraw, shape: Shape, scale: float) -> None:
     pts = _scaled(shape.points, scale)
     if shape.tool in ("freehand", "line"):
+        # AIDEV-NOTE: A single-point polyline renders nothing (PIL draws no
+        # segments), while hit_test would still match it — session code (Phase 2)
+        # must guarantee >= 2 points per stroke before calling render_overlay.
         ink = _rgba(shape.color, shape.opacity)
         draw.line(pts, fill=ink, width=_stroke_width(shape.width_px, scale), joint="curve")
     elif shape.tool == "arrow":

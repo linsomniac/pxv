@@ -193,3 +193,29 @@ def test_scale_equivalence_by_iou() -> None:
     union = sum(1 for x, y in zip(a, b) if x or y)
     assert union > 0
     assert inter / union > 0.8  # measured ~0.97 on Pillow 12; threshold is slack
+
+
+def test_freehand_multipoint_with_duplicate_renders() -> None:
+    s = Shape(
+        tool="freehand",
+        points=((2.0, 2.0), (10.0, 18.0), (10.0, 18.0), (20.0, 4.0)),
+        color="#ff0000",
+        width_px=4.0,
+    )
+    overlay = render_overlay([s], (24, 24), 1.0)
+    assert overlay.getchannel("A").getbbox() is not None
+    # The stroke reaches the last point (20, 4); PIL may land 1 px off the
+    # exact tip due to rounding, so check the nearest reliably-hit pixel.
+    assert overlay.getpixel((19, 4))[3] > 0  # reaches the last point
+
+
+def test_text_scales_with_scale_factor() -> None:
+    if not scalable_font_available():
+        pytest.skip("bitmap fallback ignores size")
+    s = Shape(
+        tool="text", points=((2.0, 2.0),), color="#000000", width_px=1.0, text="Hi", font_px=16.0
+    )
+    small = render_overlay([s], (64, 32), 1.0).getchannel("A").getbbox()
+    big = render_overlay([s], (128, 64), 2.0).getchannel("A").getbbox()
+    assert small is not None and big is not None
+    assert (big[2] - big[0]) > (small[2] - small[0])  # wider at scale 2
