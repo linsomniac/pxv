@@ -268,7 +268,7 @@ def test_hit_test_eccentric_ellipse_not_overgenerous() -> None:
     axis of a flat ellipse. The gradient-normalized formula must reject probes
     that are clearly inside the curve and only accept ones near the boundary."""
     flat = Shape(tool="ellipse", points=((0.0, 0.0), (200.0, 10.0)), color="#ff0000", width_px=2.0)
-    # A point roughly 40 px inside the right side of a 200×10 ellipse must miss.
+    # ~4 px from the true boundary — outside tol 3; the axial approximation reads it as 40.
     assert hit_test((flat,), (160.0, 5.0), 3.0) is None
     # A point very close to the right tip of the curve must hit.
     assert hit_test((flat,), (199.0, 5.0), 3.0) == 0

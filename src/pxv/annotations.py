@@ -93,15 +93,17 @@ def _shape_hit(shape: Shape, xy: tuple[float, float], tol: float) -> bool:
         return min(_segment_distance(xy, corners[i], corners[i + 1]) for i in range(4)) <= tol
     # AIDEV-NOTE: Ellipse hit via gradient-normalized distance. r is the
     # normalised radius (1.0 = on the curve). True Euclidean distance to the
-    # ellipse boundary is approximated as |r - 1| * r / |∇r|, where
-    # |∇r| = hypot(x/rx², y/ry²) is the spatial gradient of r at the probe
-    # point. This approximation is tight near the curve and handles eccentric
+    # ellipse boundary is approximated as |r - 1| / |∇r| where
+    # |∇r| = hypot((x-cx)/rx², (y-cy)/ry²) / r; the code folds the /r into
+    # a *r in the numerator, giving `abs(r - 1) * r / grad` (grad is computed
+    # WITHOUT the /r factor). Do NOT drop the r factor — that would make the
+    # approximation wrong for points far from the curve. This handles eccentric
     # ellipses correctly (unlike the old tol/min(rx,ry) band, which was up to
     # rx/ry× too generous along the major axis of a flat ellipse).
     # At the exact centre the gradient is ~0; we guard that by treating the
-    # centre as "hit" for filled shapes (distance = min(rx,ry)) and "miss" for
-    # outline shapes. Arrows hit-test on the shaft polyline only — the head
-    # wings that extend beyond tol do not contribute to selection.
+    # centre as "hit" for filled shapes and "miss" for outline shapes. Arrows
+    # hit-test on the shaft polyline only — the head wings that extend beyond
+    # tol do not contribute to selection.
     cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
     rx, ry = max((x1 - x0) / 2.0, 1e-6), max((y1 - y0) / 2.0, 1e-6)
     r = math.hypot((xy[0] - cx) / rx, (xy[1] - cy) / ry)

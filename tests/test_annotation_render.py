@@ -43,3 +43,16 @@ def test_arrow_head_degenerate_points_are_finite() -> None:
 
 def test_scalable_font_available_returns_bool() -> None:
     assert scalable_font_available() in (True, False)
+
+
+def test_arrow_head_oblique_geometry() -> None:
+    p0, p1 = (0.0, 0.0), (10.0, 10.0)
+    tip, left, right = arrow_head(p0, p1, 4.0)  # length 12
+    base_mid = ((left[0] + right[0]) / 2, (left[1] + right[1]) / 2)
+    assert math.hypot(tip[0] - base_mid[0], tip[1] - base_mid[1]) == pytest.approx(12.0)
+    assert math.hypot(left[0] - right[0], left[1] - right[1]) == pytest.approx(
+        12.0
+    )  # base == length
+    # base is perpendicular to the shaft direction
+    ux, uy = (p1[0] - p0[0]) / math.hypot(10, 10), (p1[1] - p0[1]) / math.hypot(10, 10)
+    assert (left[0] - right[0]) * ux + (left[1] - right[1]) * uy == pytest.approx(0.0)

@@ -21,11 +21,13 @@ HIGHLIGHT_ALPHA_FACTOR = 0.4
 
 def arrow_head(
     p0: tuple[float, float], p1: tuple[float, float], width_px: float
-) -> tuple[tuple[float, float], ...]:
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     """Filled triangular head at p1: (tip, base_left, base_right), image coords.
 
     Length max(3.0 * width_px, 8.0) image px, oriented along p0 -> p1; the
     base is as wide as the head is long. Pure geometry, unit-testable.
+    base_left/base_right follow y-up math convention (visually flipped in
+    y-down image coords — harmless for a filled polygon).
     """
     length = max(3.0 * width_px, 8.0)
     dx, dy = p1[0] - p0[0], p1[1] - p0[1]
@@ -54,6 +56,6 @@ def scalable_font_available() -> bool:
     """
     try:
         ImageFont.load_default(size=12.0)
-    except ImportError:
+    except (ImportError, OSError):
         return False
     return True
