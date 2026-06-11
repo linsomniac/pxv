@@ -974,3 +974,66 @@ def test_escape_deselects_before_doing_nothing(tmp_path) -> None:  # noqa: ANN00
         palette._end_session(bake=False)
     finally:
         root.destroy()
+
+
+def test_two_consecutive_moves_on_same_shape_are_two_undo_steps(tmp_path) -> None:  # noqa: ANN001
+    """Two separate select+move runs on the SAME shape are TWO undo steps.
+
+    Step 0 test: pins that a future 'skip select_at when re-pressing the
+    already-selected shape' optimisation would not silently merge them.
+    """
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)  # (10,10)-(40,10)
+        palette.select_tool_key("1")
+
+        # First select+move: press, move +0,+20, release.
+        palette.on_press((25.0, 10.0))
+        palette.on_drag((25.0, 30.0))
+        palette.on_release((25.0, 30.0))
+        pos_after_first = palette.layer.shapes[0].points
+
+        # Second press on the same shape (select_at breaks the coalesce run), move +0,+20.
+        palette.on_press((25.0, 30.0))
+        palette.on_drag((25.0, 50.0))
+        palette.on_release((25.0, 50.0))
+        pos_after_second = palette.layer.shapes[0].points
+
+        assert pos_after_second != pos_after_first  # actually moved
+
+        # Walk back through both undo steps independently.
+        assert palette.layer.undo() is True  # rolls back the second move
+        assert palette.layer.shapes[0].points == pos_after_first
+        assert palette.layer.undo() is True  # rolls back the first move
+        assert palette.layer.shapes[0].points == ((10.0, 10.0), (40.0, 10.0))
+
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_styling_controls_restyle_live_selection_coalesced(tmp_path) -> None:  # noqa: ANN001
+    from pxv.annotations import size_presets
+
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette, y=10.0)  # red, medium (width 2.0 at long side 100)
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        palette.set_color("#00ff00")
+        palette.set_color("#0000ff")  # same coalesced run
+        palette._size_var.set("thick")
+        palette._on_size_selected()  # still the same run
+        (shape,) = palette.layer.shapes
+        assert shape.color == "#0000ff"
+        assert shape.width_px == size_presets(100).widths[2]
+        assert palette.color == "#0000ff"  # defaults for NEW shapes follow too
+        assert palette.layer.undo() is True  # ONE step: the whole restyle run
+        (shape,) = palette.layer.shapes
+        assert shape.color == "#ff0000" and shape.width_px == 2.0
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()

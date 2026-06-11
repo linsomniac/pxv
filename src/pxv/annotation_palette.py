@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
+from dataclasses import replace
 from tkinter import colorchooser, messagebox, ttk
-from typing import TYPE_CHECKING, Literal, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
 from pxv.annotation_render import render_overlay
 from pxv.annotations import AnnotationLayer, Shape, Tool, hit_tolerance, size_presets
@@ -86,7 +87,8 @@ class AnnotationPalette(tk.Toplevel):
         # _end_session from running twice.
         self._ended: bool = False
 
-        # Styling state for NEW shapes (restyling a selection arrives in Phase 3).
+        # Styling state for NEW shapes; with a live selection the controls
+        # also restyle it (see _restyle_selection).
         self._presets = size_presets(max(app.image_model.get_working_size()))
         self.tool: PaletteTool = "freehand"
         self.color: str = SWATCHES[0]
@@ -225,9 +227,10 @@ class AnnotationPalette(tk.Toplevel):
         self.app.canvas_view.set_annotation_cursor(self.tool == "select")
 
     def set_color(self, color: str) -> None:
-        """Set the '#rrggbb' color for NEW shapes."""
+        """Set the '#rrggbb' color for new shapes; restyle the selection live."""
         self.color = color
         self._color_indicator.configure(bg=color)
+        self._restyle_selection(color=color)
 
     def _on_custom_color(self) -> None:
         _rgb, hexcolor = colorchooser.askcolor(color=self.color, parent=self)
@@ -237,6 +240,21 @@ class AnnotationPalette(tk.Toplevel):
     def _on_size_selected(self) -> None:
         idx = {"thin": 0, "medium": 1, "thick": 2}[self._size_var.get()]
         self.width_px = self._presets.widths[idx]
+        self._restyle_selection(width_px=self.width_px)
+
+    def _restyle_selection(self, **changes: Any) -> None:
+        """Apply a styling change to the live selection; no-op without one.
+
+        AIDEV-NOTE: Consecutive replace_selected calls on the same index
+        coalesce (annotations.py), so walking through swatches and sizes with
+        a selection held is ONE undo step; re-selecting breaks the run.
+        """
+        if self.layer.selected is None:
+            return
+        shape = replace(self.layer.shapes[self.layer.selected], **changes)
+        self.layer.replace_selected(shape)
+        self._refresh_selection_marker()
+        self.app.refresh_display()
 
     # --- session protocol (called by CanvasView and the app) ----------------
 
