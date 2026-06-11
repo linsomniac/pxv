@@ -1146,3 +1146,71 @@ def test_highlight_tool_accumulates_and_bakes_translucent(tmp_path) -> None:  # 
         assert 100 <= r <= 104 and g == 0 and 151 <= b <= 155
     finally:
         root.destroy()
+
+
+def test_opacity_slider_styles_new_shapes_and_restyles_selection(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette._opacity_var.set(50.0)
+        palette._on_opacity_changed("50.0")  # the tk.Scale command callback
+        assert palette.opacity == 0.5
+        _draw_line(palette, y=10.0)
+        (shape,) = palette.layer.shapes
+        assert shape.opacity == 0.5
+        # With a live selection the slider restyles it — coalesced, so a whole
+        # slider walk is ONE undo step (2026-06-10 design).
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 10.0))
+        palette.on_release((25.0, 10.0))
+        assert palette.layer.selected == 0
+        for v in (40.0, 30.0, 20.0):
+            palette._opacity_var.set(v)
+            palette._on_opacity_changed(str(v))
+        assert palette.layer.shapes[0].opacity == 0.2
+        assert palette.layer.undo() is True
+        assert palette.layer.shapes[0].opacity == 0.5  # one step back past the walk
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_fill_toggle_styles_new_rects_and_restyles_only_rect_ellipse(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette._fill_var.set(True)
+        palette._on_fill_toggled()
+        assert palette.fill is True
+        palette.select_tool_key("5")  # rect
+        palette.on_press((10.0, 10.0))
+        palette.on_drag((40.0, 40.0))
+        palette.on_release((40.0, 40.0))
+        assert palette.layer.shapes[0].fill is True
+        _draw_line(palette, y=60.0)
+        assert palette.layer.shapes[1].fill is False  # fill is rect/ellipse-only
+        # A selected LINE ignores the toggle (no junk undo step)...
+        palette.select_tool_key("1")
+        palette.on_press((25.0, 60.0))
+        palette.on_release((25.0, 60.0))
+        assert palette.layer.selected == 1
+        palette._fill_var.set(False)
+        palette._on_fill_toggled()
+        assert palette.layer.shapes[1].fill is False
+        # No junk undo step: the toggle on a line interposed nothing, so one
+        # undo removes the line-add itself (a no-change replace would not).
+        assert palette.layer.undo() is True
+        assert len(palette.layer.shapes) == 1
+        assert palette.layer.redo() is True  # restore the line for the rect part
+        assert len(palette.layer.shapes) == 2
+        # ...but a selected rect restyles live (picked by its filled interior;
+        # undo/redo cleared the selection, so this re-picks from scratch).
+        palette.on_press((25.0, 25.0))
+        palette.on_release((25.0, 25.0))
+        assert palette.layer.selected == 0
+        palette._fill_var.set(False)
+        palette._on_fill_toggled()
+        assert palette.layer.shapes[0].fill is False
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()

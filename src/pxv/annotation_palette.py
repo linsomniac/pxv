@@ -98,6 +98,8 @@ class AnnotationPalette(tk.Toplevel):
         self.tool: PaletteTool = "freehand"
         self.color: str = SWATCHES[0]
         self.width_px: float = self._presets.widths[1]  # medium
+        self.opacity: float = 1.0
+        self.fill: bool = False
 
         # In-flight drag: accumulated image-space points, or None.
         self._drag_points: list[tuple[float, float]] | None = None
@@ -110,6 +112,8 @@ class AnnotationPalette(tk.Toplevel):
 
         self._tool_var = tk.StringVar(value=self.tool)
         self._size_var = tk.StringVar(value="medium")
+        self._opacity_var = tk.DoubleVar(value=100.0)
+        self._fill_var = tk.BooleanVar(value=False)
         self._build_ui()
         self._bind_keys()
 
@@ -184,6 +188,23 @@ class AnnotationPalette(tk.Toplevel):
                 command=self._on_size_selected,
             ).grid(row=0, column=col, padx=4)
 
+        style = ttk.LabelFrame(main, text="Style", padding=6)
+        style.pack(fill=tk.X, pady=(6, 0))
+        ttk.Checkbutton(
+            style, text="Fill", variable=self._fill_var, command=self._on_fill_toggled
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(style, text="Opacity").pack(side=tk.LEFT)
+        self._opacity_scale = tk.Scale(
+            style,
+            from_=0,
+            to=100,
+            orient=tk.HORIZONTAL,
+            variable=self._opacity_var,
+            command=self._on_opacity_changed,
+            length=140,
+        )
+        self._opacity_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+
         btns = ttk.Frame(main)
         btns.pack(fill=tk.X, pady=(8, 0))
         ttk.Button(btns, text="Done", command=self._on_done, width=8).pack(side=tk.LEFT, padx=4)
@@ -246,6 +267,27 @@ class AnnotationPalette(tk.Toplevel):
         idx = {"thin": 0, "medium": 1, "thick": 2}[self._size_var.get()]
         self.width_px = self._presets.widths[idx]
         self._restyle_selection(width_px=self.width_px)
+
+    def _on_fill_toggled(self) -> None:
+        """Filled-vs-outline default for new rect/ellipse; restyles a selection.
+
+        Only a rect/ellipse selection restyles — fill means nothing to the
+        other tools, and a no-change replace would still cost an undo step.
+        """
+        self.fill = self._fill_var.get()
+        sel = self.layer.selected
+        if sel is not None and self.layer.shapes[sel].tool in ("rect", "ellipse"):
+            self._restyle_selection(fill=self.fill)
+
+    def _on_opacity_changed(self, _value: str) -> None:
+        """Slider motion: opacity default for new shapes; restyles a selection.
+
+        AIDEV-NOTE: Fires per motion event during a slider drag — the restyle
+        coalesces in AnnotationLayer.replace_selected, so a whole slider drag
+        is ONE undo step (2026-06-10 design).
+        """
+        self.opacity = float(self._opacity_var.get()) / 100.0
+        self._restyle_selection(opacity=self.opacity)
 
     def _restyle_selection(self, **changes: Any) -> None:
         """Apply a styling change to the live selection; no-op without one.
@@ -329,7 +371,14 @@ class AnnotationPalette(tk.Toplevel):
         if max(math.hypot(x - x0, y - y0) for x, y in points) * zoom < MIN_DRAG_SCREEN_PX:
             return
         self.layer.add(
-            Shape(tool=self.tool, points=tuple(points), color=self.color, width_px=self.width_px)
+            Shape(
+                tool=self.tool,
+                points=tuple(points),
+                color=self.color,
+                width_px=self.width_px,
+                fill=self.fill if self.tool in ("rect", "ellipse") else False,
+                opacity=self.opacity,
+            )
         )
         self.app.annotations_unsaved = True  # set on the first shape (and kept)
         self.app.refresh_display()

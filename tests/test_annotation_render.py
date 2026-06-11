@@ -219,3 +219,30 @@ def test_text_scales_with_scale_factor() -> None:
     big = render_overlay([s], (128, 64), 2.0).getchannel("A").getbbox()
     assert small is not None and big is not None
     assert (big[2] - big[0]) > (small[2] - small[0])  # wider at scale 2
+
+
+def test_highlight_alpha_composes_with_opacity() -> None:
+    s = Shape(
+        tool="highlight",
+        points=((2.0, 10.0), (28.0, 10.0)),
+        color="#ffff00",
+        width_px=2.0,
+        opacity=0.5,
+    )
+    overlay = render_overlay([s], (30, 20), 1.0)
+    # alpha = round(0.4 * 0.5 * 255) = 51; the width stays 4 x width_px.
+    assert overlay.getpixel((15, 10)) == (255, 255, 0, 51)
+    assert _column_alpha_count(overlay, 15) == 8
+
+
+def test_filled_rect_respects_opacity() -> None:
+    s = Shape(
+        tool="rect",
+        points=((2.0, 2.0), (17.0, 17.0)),
+        color="#ff0000",
+        width_px=1.0,
+        fill=True,
+        opacity=0.25,
+    )
+    overlay = render_overlay([s], (20, 20), 1.0)
+    assert overlay.getpixel((10, 10)) == (255, 0, 0, 64)  # round(0.25 * 255)
