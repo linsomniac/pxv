@@ -444,7 +444,15 @@ class PxvApp:
         first checkpoint: never composite against a replaced image.
         """
         palette = self.annotation_palette
-        if display_img is None or palette is None or not palette.layer.shapes:
+        if display_img is None or palette is None:
+            return display_img
+        # AIDEV-NOTE: Every display re-render is a view change as far as the
+        # text-entry popup is concerned — its screen position derived from
+        # canvas coords that are now stale (zoom/resize/background/restyle) —
+        # so it is dismissed here, the one chokepoint both display paths share
+        # (2026-06-10 design: zoom/navigation/Done/stale guard all cancel it).
+        palette.cancel_text_popup()
+        if not palette.layer.shapes:
             return display_img
         if not palette.image_is_current():
             palette.cancel_stale()  # tears down + refreshes; skip the overlay
