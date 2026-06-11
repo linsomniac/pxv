@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import tkinter as tk
 from tkinter import colorchooser, messagebox, ttk
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from pxv.annotation_render import render_overlay
 from pxv.annotations import AnnotationLayer, Shape, Tool, size_presets
@@ -35,7 +35,7 @@ TOOL_KEYS: dict[str, Tool] = {
     "6": "ellipse",
 }
 
-_PREVIEW_KINDS: dict[Tool, str] = {
+_PREVIEW_KINDS: dict[Tool, Literal["polyline", "line", "arrow", "rect", "ellipse"]] = {
     "freehand": "polyline",
     "line": "line",
     "arrow": "arrow",
@@ -69,8 +69,16 @@ class AnnotationPalette(tk.Toplevel):
         # through some unguarded path (the known paths are gated in
         # commands.py); checked before compositing and at bake start.
         self._session_image = app.image_model.working_image
-        # (layer.revision, display_size) -> rendered RGBA display overlay.
-        self._overlay_cache: tuple[tuple[int, tuple[int, int]], Image.Image] | None = None
+        # (layer.revision, display_size, scale) -> rendered RGBA display overlay.
+        self._overlay_cache: tuple[tuple[int, tuple[int, int], float], Image.Image] | None = None
+        # Capture the dirty flag at open — a confirmed Cancel only discards THIS
+        # session's shapes; baked-but-unsaved work from earlier sessions is
+        # preserved.
+        self._dirty_at_open: bool = app.annotations_unsaved
+        # Exactly-once funnel latch: askyesno spins a local event loop during which
+        # cancel_stale could tear down the palette mid-prompt; the latch prevents
+        # _end_session from running twice.
+        self._ended: bool = False
 
         # Styling state for NEW shapes (restyling a selection arrives in Phase 3).
         self._presets = size_presets(max(app.image_model.get_working_size()))
@@ -221,6 +229,12 @@ class AnnotationPalette(tk.Toplevel):
     def on_press(self, image_xy: tuple[float, float]) -> None:
         if self._cancel_latch:
             return
+        # AIDEV-NOTE: Re-anchor to the current image if the session is empty and
+        # the image was swapped since open — drawing on the new image is safe
+        # because nothing was drawn on the old one, and this prevents the first
+        # shape from being instantly discarded by cancel_stale.
+        if not self.layer.shapes and not self.image_is_current():
+            self._session_image = self.app.image_model.working_image
         self._drag_points = [image_xy]
 
     def on_drag(self, image_xy: tuple[float, float]) -> None:
@@ -231,7 +245,7 @@ class AnnotationPalette(tk.Toplevel):
         else:
             self._drag_points = [self._drag_points[0], image_xy]
         self.app.canvas_view.set_preview_shape(
-            _PREVIEW_KINDS[self.tool],  # type: ignore[arg-type]
+            _PREVIEW_KINDS[self.tool],
             self._drag_points,
             self.color,
             self.width_px,
@@ -267,13 +281,13 @@ class AnnotationPalette(tk.Toplevel):
     def render_display_overlay(self, target_size: tuple[int, int], scale: float) -> Image.Image:
         """The committed shapes rendered as an RGBA overlay at display size.
 
-        AIDEV-NOTE: Cache key is (layer.revision, target_size) — revision
+        AIDEV-NOTE: Cache key is (layer.revision, target_size, scale) — revision
         bumps on every shape mutation. Only the OVERLAY is cached: the base
         display image changes under the same key (enhancement debounce,
         Compare, background toggle), so the app composites onto a fresh base
         every refresh (2026-06-10 design).
         """
-        key = (self.layer.revision, target_size)
+        key = (self.layer.revision, target_size, scale)
         if self._overlay_cache is None or self._overlay_cache[0] != key:
             self._overlay_cache = (key, render_overlay(self.layer.shapes, target_size, scale))
         return self._overlay_cache[1]
@@ -339,8 +353,10 @@ class AnnotationPalette(tk.Toplevel):
         if self.layer.shapes:
             if not messagebox.askyesno("pxv", "Discard annotations?", parent=self):
                 return
-            # A confirmed discard clears the dirty flag (2026-06-10 lifecycle).
-            self.app.annotations_unsaved = False
+            # A confirmed discard only covers THIS session's shapes — restore the
+            # dirty flag to what it was when the palette opened (baked-but-unsaved
+            # work from earlier sessions is NOT discarded by this Cancel).
+            self.app.annotations_unsaved = self._dirty_at_open
         self._end_session(bake=False)
 
     def _end_session(self, bake: bool) -> None:
@@ -350,9 +366,14 @@ class AnnotationPalette(tk.Toplevel):
         event can reach a dying session, then destroys the window, keeping the
         palette-open <=> mode-active invariant.
         """
+        # AIDEV-NOTE: Exactly-once latch — askyesno in _on_cancel spins a local
+        # Tk event loop during which cancel_stale could call _end_session again.
+        if self._ended:
+            return
+        self._ended = True
         self.app.canvas_view.set_annotation_session(None)
         shapes = self.layer.shapes
-        stale = bake and not self.image_is_current()
+        stale = bake and bool(shapes) and not self.image_is_current()
         if stale:
             # Stale-image guard at bake start: never bake against the wrong image.
             bake = False

@@ -365,8 +365,11 @@ class PxvApp:
         working = self.image_model.working_image
         if working is None or not shapes:
             return
-        self.record_history()
+        # AIDEV-NOTE: Render FIRST so a render failure never leaves a dead no-op
+        # undo entry; record_history only after a successful render (2026-06-10
+        # ordering).
         overlay = render_overlay(shapes, working.size, 1.0)
+        self.record_history()
         self.image_model.apply_overlay(overlay)
         self.annotations_unsaved = True
         self.refresh_display()

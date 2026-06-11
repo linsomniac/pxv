@@ -485,7 +485,7 @@ def test_stale_image_guard_cancels_session_at_composite(tmp_path) -> None:  # no
         # An unguarded surprise replaces the image under the session:
         app.image_model.working_image = Image.new("RGB", (100, 80), (9, 9, 9))
         app.refresh_display()
-        root.update()  # flush the deferred stale-message after_idle
+        root.update()  # process pending events; the stale teardown already set the title synchronously
         assert app.annotation_palette is None  # guard tore the session down
         assert not palette.winfo_exists()
         assert "image changed" in root.title()
@@ -507,5 +507,47 @@ def test_stale_image_guard_blocks_bake_at_done(tmp_path) -> None:  # noqa: ANN00
         assert working is not None
         assert working.getpixel((25, 10)) == (9, 9, 9)  # never baked the wrong image
         assert "image changed" in root.title()
+    finally:
+        root.destroy()
+
+
+def test_cancel_after_bake_preserves_pre_session_dirty_flag(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    """Regression: confirmed Cancel only discards THIS session — prior baked work survives."""
+    app, root, _ = _make_app(tmp_path)
+    try:
+        # First session: draw and Done (bake sets annotations_unsaved=True)
+        palette1 = _open_palette(app)
+        _draw_line(palette1)
+        palette1._on_done()
+        assert app.annotations_unsaved is True
+        assert app.annotation_palette is None
+
+        # Second session: draw, then Cancel-confirm
+        palette2 = _open_palette(app)
+        _draw_line(palette2, y=30.0)
+        monkeypatch.setattr(
+            "pxv.annotation_palette.messagebox",
+            types.SimpleNamespace(askyesno=lambda *a, **k: True),
+        )
+        palette2._on_cancel()
+        assert app.annotation_palette is None
+        # The baked-but-unsaved work from the first session must still be flagged.
+        assert app.annotations_unsaved is True
+    finally:
+        root.destroy()
+
+
+def test_stale_guard_fires_through_update_display_path(tmp_path) -> None:  # noqa: ANN001
+    """Stale guard also trips when the image is replaced and _update_display is called."""
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        _draw_line(palette)
+        # Replace the working image under the session.
+        app.image_model.working_image = Image.new("RGB", (100, 80), (9, 9, 9))
+        # _update_display is the window-resize path; it calls _composite_annotations.
+        app._update_display()
+        assert app.annotation_palette is None
+        assert not palette.winfo_exists()
     finally:
         root.destroy()
