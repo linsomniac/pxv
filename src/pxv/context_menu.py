@@ -58,6 +58,9 @@ class ContextMenu:
         self.menu.add_command(
             label="Enhancements...", command=lambda: commands.cmd_enhancement_dialog(app)
         )
+        self.menu.add_command(
+            label="Draw / Annotate...", command=lambda: commands.cmd_annotate(app)
+        )
         self.menu.add_command(label="About", command=lambda: commands.cmd_about(app))
         self.menu.add_separator()
 

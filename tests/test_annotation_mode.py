@@ -1623,3 +1623,24 @@ def test_text_tool_key_shows_ibeam_cursor(tmp_path) -> None:  # noqa: ANN001
         palette._end_session(bake=False)
     finally:
         root.destroy()
+
+
+def test_context_menu_draw_entry_opens_palette(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        menu = app.context_menu.menu
+        end = menu.index("end")
+        assert end is not None
+        labels = {
+            menu.entrycget(i, "label"): i for i in range(end + 1) if menu.type(i) == "command"
+        }
+        assert "Draw / Annotate..." in labels
+        menu.invoke(labels["Draw / Annotate..."])
+        palette = app.annotation_palette
+        assert palette is not None  # the entry routes through cmd_annotate...
+        assert app.canvas_view._annotation_session is palette
+        menu.invoke(labels["Draw / Annotate..."])  # ...so a second invoke raises,
+        assert app.annotation_palette is palette and palette.winfo_exists()  # never closes
+        palette._on_done()
+    finally:
+        root.destroy()
