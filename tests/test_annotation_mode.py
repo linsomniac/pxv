@@ -417,13 +417,13 @@ def test_tool_keys_select_and_others_inert(tmp_path) -> None:  # noqa: ANN001
             ("4", "arrow"),
             ("5", "rect"),
             ("6", "ellipse"),
+            ("7", "highlight"),
         ):
             palette.select_tool_key(char)
             assert palette.tool == tool
             assert palette._tool_var.get() == tool  # button row follows
-        for char in ("7", "8"):  # Phase 4 tools: stable numbers, inert keys
-            palette.select_tool_key(char)
-        assert palette.tool == "ellipse"
+        palette.select_tool_key("8")  # text lands later in this phase: still inert
+        assert palette.tool == "highlight"
         palette._end_session(bake=False)
     finally:
         root.destroy()
@@ -1118,5 +1118,31 @@ def test_delete_key_inert_without_draw_mode(tmp_path) -> None:  # noqa: ANN001
         assert root.bind("<Delete>")  # the root binding exists
         commands.cmd_delete(app)  # no palette: nothing to do, must not raise
         assert app.annotation_palette is None
+    finally:
+        root.destroy()
+
+
+def test_highlight_tool_accumulates_and_bakes_translucent(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("7")
+        assert palette.tool == "highlight"
+        palette.on_press((10.0, 40.0))
+        palette.on_drag((30.0, 40.0))
+        # Outline-only Tk polyline preview (per-item alpha is impossible in Tk).
+        assert app.canvas_view._preview_id is not None
+        palette.on_drag((50.0, 40.0))
+        palette.on_release((70.0, 40.0))
+        (shape,) = palette.layer.shapes
+        assert shape.tool == "highlight"
+        assert shape.points == ((10.0, 40.0), (30.0, 40.0), (50.0, 40.0), (70.0, 40.0))
+        palette._on_done()
+        working = app.image_model.working_image
+        assert working is not None
+        # The TRUE translucent render: 0.4-alpha red over the blue base
+        # -> (102, 0, 153); the stroke is 4 x width_px = 8 px tall around y=40.
+        r, g, b = working.getpixel((40, 40))
+        assert 100 <= r <= 104 and g == 0 and 151 <= b <= 155
     finally:
         root.destroy()

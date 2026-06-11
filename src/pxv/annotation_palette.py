@@ -31,8 +31,8 @@ PaletteTool = Union[Tool, Literal["select"]]
 
 # AIDEV-NOTE: Tool numbering is stable across phases (2026-06-10 design):
 # 1 Select, 2 freehand, 3 line, 4 arrow, 5 rect, 6 ellipse, 7 highlighter,
-# 8 text. Phases 2-3 ship 1-6; the 7/8 keys are inert and their buttons
-# disabled until Phase 4.
+# 8 text. 1-7 ship; the 8 key stays inert until the text tool lands later
+# in Phase 4.
 TOOL_KEYS: dict[str, PaletteTool] = {
     "1": "select",
     "2": "freehand",
@@ -40,6 +40,7 @@ TOOL_KEYS: dict[str, PaletteTool] = {
     "4": "arrow",
     "5": "rect",
     "6": "ellipse",
+    "7": "highlight",
 }
 
 _PREVIEW_KINDS: dict[Tool, Literal["polyline", "line", "arrow", "rect", "ellipse"]] = {
@@ -48,6 +49,10 @@ _PREVIEW_KINDS: dict[Tool, Literal["polyline", "line", "arrow", "rect", "ellipse
     "arrow": "arrow",
     "rect": "rect",
     "ellipse": "ellipse",
+    # AIDEV-NOTE: The highlighter previews as an outline-only polyline at the
+    # NOMINAL width — Tk items cannot do per-item alpha, so the true 4x-wide
+    # translucent stroke appears only at release (the PIL render).
+    "highlight": "polyline",
 }
 
 # Preset swatches: red, yellow, green, blue, white, black (spec order).
@@ -136,7 +141,7 @@ class AnnotationPalette(tk.Toplevel):
             ("4", "Arrow", True),
             ("5", "Rect", True),
             ("6", "Ellipse", True),
-            ("7", "Highlight", False),
+            ("7", "Highlight", True),
             ("8", "Text", False),
         ):
             btn = ttk.Radiobutton(
@@ -287,7 +292,7 @@ class AnnotationPalette(tk.Toplevel):
         if self._drag_points is None:
             return
         # self.tool is narrowed to Tool here (the "select" branch returned above)
-        if self.tool == "freehand":
+        if self.tool in ("freehand", "highlight"):
             self._drag_points.append(image_xy)
         else:
             self._drag_points = [self._drag_points[0], image_xy]
@@ -312,7 +317,7 @@ class AnnotationPalette(tk.Toplevel):
         points = self._drag_points
         self._drag_points = None
         self.app.canvas_view.clear_preview()
-        if self.tool == "freehand":
+        if self.tool in ("freehand", "highlight"):
             points.append(image_xy)
         else:
             points = [points[0], image_xy]
