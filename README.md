@@ -85,7 +85,8 @@ Without flakes, `nix-build` produces the package from a checkout (uses `default.
 | `b` | Browse thumbnails (Visual Schnauzer) |
 | `c` | Crop to selection |
 | `A` | Autocrop background borders |
-| `u` | Uncrop (undo last crop) |
+| `u` / `Ctrl+Z` | Undo |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
 | `t` | Rotate clockwise |
 | `T` | Rotate counterclockwise |
 | `D` | Toggle dark/light background |
@@ -93,6 +94,7 @@ Without flakes, `nix-build` produces the package from a checkout (uses `default.
 | `s` | Toggle slideshow |
 | `+` / `-` | Slideshow interval +/- 1s |
 | `e` | Enhancement dialog |
+| `d` | Draw / annotate (drawing palette) |
 | `i` | Show image info / EXIF |
 | `Ctrl+s` | Save as |
 | `Escape` | Exit slideshow/fullscreen, or clear selection |
@@ -118,8 +120,29 @@ every change:
 **Compare** (hold) flips between the original and adjusted image; **Apply**
 bakes the adjustments into the working image (undoable with `u`/Ctrl+Z).
 
+## Annotations
+
+Draw mode (`d`, or right-click → Draw / Annotate...) opens a tool palette and
+turns the canvas into a drawing surface:
+
+- **Tools** (keys `1`–`8`) — Select, freehand, line, arrow, rectangle,
+  ellipse, highlighter, and text labels
+- **Styling** — six color swatches plus a custom chooser, thin/medium/thick
+  size presets (auto-scaled to the image size), filled-vs-outline toggle, and
+  an opacity slider; with a shape selected, the controls restyle it live
+- **Editing** — the Select tool picks the topmost shape: drag to move,
+  `Delete`/`Backspace` to remove, `u`/`Ctrl+Z`/`Ctrl+Y` for in-mode
+  undo/redo; double-click a text label to re-edit it
+
+Shapes stay editable vector objects while the palette is open, and their
+sizes are in image pixels — the saved file is independent of the zoom you
+drew at. **Done** (or closing the palette window) bakes them into the image
+as a single undoable edit; **Cancel** discards them after confirmation.
+Navigating away or quitting with unsaved annotation work prompts first.
+
 ## Features
 
+- Image annotations / draw mode: freehand, lines, arrows, boxes, ellipses, highlighter, and text labels — editable vectors during the session, baked as one undoable edit
 - Histogram, levels, and curves in the enhancement dialog (beyond-xv: live histogram backdrop, eyedroppers, editable equalization)
 - XV-style window sizing: window grows/shrinks to fit the displayed image, capped at the current monitor's bounds
 - Multi-monitor aware: detects per-monitor geometry via xrandr so windows don't span displays
@@ -134,7 +157,7 @@ bakes the adjustments into the working image (undoable with `u`/Ctrl+Z).
 
 - Python 3.10+
 - Tkinter (usually included with Python; on Debian/Ubuntu: `sudo apt install python3-tk`)
-- Pillow 10+
+- Pillow 10.1+
 
 ## Development
 
