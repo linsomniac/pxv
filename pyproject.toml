@@ -10,11 +10,13 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    # AIDEV-NOTE: Floor is the oldest Pillow providing the Image.Resampling /
-    # Image.Transpose enums (9.1+); 10.0 is a conservative, widely-available choice.
-    # Avoid raising this without a concrete API need — it forces upgrades and can
-    # cause resolver conflicts in shared environments.
-    "pillow>=10.0",
+    # AIDEV-NOTE: Floor is the oldest Pillow providing ImageFont.load_default(size=...)
+    # (10.1+), which annotation_render.py needs for scalable text labels — the
+    # "concrete API need" this note used to anticipate (it also covers the older
+    # Image.Resampling / Image.Transpose floor, 9.1+). Avoid raising this further
+    # without a concrete API need — it forces upgrades and can cause resolver
+    # conflicts in shared environments.
+    "pillow>=10.1",
 ]
 keywords = ["image", "viewer", "xv", "pillow", "tkinter", "graphics"]
 classifiers = [
@@ -50,6 +52,7 @@ line-length = 99
 
 [tool.mypy]
 strict = true
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = "PIL.*"

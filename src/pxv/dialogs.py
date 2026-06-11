@@ -23,6 +23,7 @@ KEYBINDINGS: list[tuple[str, str]] = [
     ("Ctrl+Y / Ctrl+Shift+Z", "Redo"),
     ("n", "Zoom to 1:1 (normal)"),
     ("e", "Open enhancements dialog"),
+    ("d", "Draw / annotate (drawing palette)"),
     ("i", "Show image info / EXIF"),
     (",", "Reduce zoom 10%"),
     (".", "Increase zoom 10%"),
@@ -41,6 +42,15 @@ KEYBINDINGS: list[tuple[str, str]] = [
     ("b", "Browse thumbnails (Visual Schnauzer)"),
     ("Escape", "Exit slideshow/fullscreen, or clear selection"),
     ("Right-click", "Context menu"),
+    # AIDEV-NOTE: Empty-key rows render as a spacer / section header in
+    # help_dialog. The block below documents draw mode (the annotation
+    # palette) — these keys only act while the palette is open.
+    ("", ""),
+    ("", "— While the drawing palette is open —"),
+    ("1-8", "Tools: Select, freehand, line, arrow, rect, ellipse, highlight, text"),
+    ("u / Ctrl+Z / Ctrl+Y", "Undo / redo shapes"),
+    ("Delete / Backspace", "Delete the selected shape"),
+    ("Escape", "Cancel drag, close text popup, or deselect"),
 ]
 
 

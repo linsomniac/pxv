@@ -10,8 +10,8 @@ space for crop operations, accounting for the centering offset and zoom factor.
 from __future__ import annotations
 
 import tkinter as tk
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from PIL import ImageTk
 
@@ -78,6 +78,81 @@ def canvas_point_to_image_xy(
     return (ix, iy)
 
 
+def canvas_point_to_image_xy_f(
+    point: tuple[float, float],
+    display_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+    zoom: float,
+) -> tuple[float, float]:
+    """Map a canvas-space point to UNCLAMPED float image coords (no None case).
+
+    AIDEV-NOTE: The annotation session's converter (2026-06-10 design) — same
+    centering/zoom math as canvas_point_to_image_xy, but float precision, no
+    truncation, and out-of-image points pass through unclamped (clipping
+    happens at render time), so it needs no working_size parameter.
+    """
+    x, y = point
+    disp_w, disp_h = display_size
+    canvas_w, canvas_h = canvas_size
+    area_w = max(canvas_w, disp_w)
+    area_h = max(canvas_h, disp_h)
+    return ((x - (area_w - disp_w) / 2) / zoom, (y - (area_h - disp_h) / 2) / zoom)
+
+
+def image_xy_to_canvas_point(
+    xy: tuple[float, float],
+    display_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+    zoom: float,
+) -> tuple[float, float]:
+    """Inverse of canvas_point_to_image_xy_f: image coords -> canvas coords.
+
+    Used to (re-)derive transient Tk items (drag preview, selection marker)
+    from image-space truth after any zoom/pan/resize.
+    """
+    ix, iy = xy
+    disp_w, disp_h = display_size
+    canvas_w, canvas_h = canvas_size
+    area_w = max(canvas_w, disp_w)
+    area_h = max(canvas_h, disp_h)
+    return (ix * zoom + (area_w - disp_w) / 2, iy * zoom + (area_h - disp_h) / 2)
+
+
+# Canvas-px padding around the Select tool's dashed selection marker, so a
+# zero-height bbox (a horizontal line, a 2-point shape) still reads as a box.
+_MARKER_PAD = 3.0
+
+# Per-tool draw-mode cursors, keyed by the palette's tool name. The Select
+# tool gets the platform default arrow and the text tool an I-beam over its
+# click-to-type surface; anything else (all six drawing tools) falls back to
+# the pencil. xterm/pencil are in Tk's portable cursor set.
+_TOOL_CURSORS: dict[str, str] = {"select": "", "text": "xterm"}
+
+
+class AnnotationSession(Protocol):
+    """What CanvasView needs from the draw-mode session (the palette).
+
+    AIDEV-NOTE: A Protocol instead of importing AnnotationPalette — the
+    palette already depends on the app, which owns this view, so a real import
+    would be circular. The full session protocol additionally includes
+    render_display_overlay(target_size, scale), which the APP consumes in its
+    display-composite hook, not this view.
+    """
+
+    @property
+    def is_dragging(self) -> bool: ...
+
+    def on_press(self, image_xy: tuple[float, float]) -> None: ...
+
+    def on_drag(self, image_xy: tuple[float, float]) -> None: ...
+
+    def on_release(self, image_xy: tuple[float, float]) -> None: ...
+
+    def on_view_scrolled(self) -> None: ...
+
+    def on_double_click(self, image_xy: tuple[float, float]) -> None: ...
+
+
 class CanvasView:
     """Canvas widget that displays an image with rubber-band selection and zoom."""
 
@@ -112,12 +187,26 @@ class CanvasView:
         self._pick_callback: Callable[[tuple[int, int] | None], None] | None = None
         self._pick_working_size: tuple[int, int] | None = None
 
+        # Draw-mode session (None = normal behavior). While set, mouse events
+        # forward image-space float coords to it instead of the rubber band.
+        self._annotation_session: AnnotationSession | None = None
+        # The single transient drag-preview item (draw mode).
+        self._preview_id: int | None = None
+        # The Select tool's dashed marker: Tk item id + IMAGE-space bbox truth.
+        self._marker_id: int | None = None
+        self._marker_bbox: tuple[float, float, float, float] | None = None
+
         self._bind_mouse()
 
     def _bind_mouse(self) -> None:
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        # AIDEV-NOTE: Within one bind tag Tk fires only the MOST SPECIFIC
+        # pattern, so the second press of a double-click triggers this and
+        # never <ButtonPress-1> — _on_double_click delegates to _on_press
+        # when no annotation session is armed, keeping old behavior intact.
+        self.canvas.bind("<Double-Button-1>", self._on_double_click)
         # Right-click: Button-3 on Linux/Windows, Button-2 on macOS
         self.canvas.bind("<Button-3>", self._on_right_click_event)
         self.canvas.bind("<Button-2>", self._on_right_click_event)
@@ -170,6 +259,9 @@ class CanvasView:
         # preserves the user's current pan position.
         if size_changed:
             self._center_view()
+        # Re-derive the Select tool's marker from image-space truth — its
+        # canvas coords go stale on every zoom/pan/resize re-render.
+        self._redraw_selection_marker()
 
     def _center_view(self) -> None:
         """Center the viewport on the image (only matters when image > canvas)."""
@@ -220,6 +312,153 @@ class CanvasView:
         self._pick_working_size = working_size
         self.canvas.config(cursor="tcross" if callback is not None else "crosshair")
 
+    def set_annotation_session(self, session: AnnotationSession | None) -> None:
+        """Arm (or disarm with None) draw-mode event forwarding.
+
+        AIDEV-NOTE: Entering clears any rubber-band selection (selection
+        handling is suspended for the whole session) and shows the pencil
+        cursor — the canvas is already crosshair normally, so the mode is
+        visually distinct (the Select tool switches to the default arrow via
+        set_annotation_cursor). Disarming clears the transient preview item
+        AND the selection marker; the palette calls this FIRST in
+        _end_session (the eyedropper _on_close pattern), so no event can
+        reach a dying session.
+        """
+        self._annotation_session = session
+        if session is not None:
+            self.clear_selection()
+            self.canvas.config(cursor="pencil")
+        else:
+            self.clear_preview()
+            self.set_selection_marker(None)
+            self.canvas.config(cursor="crosshair")
+
+    def _event_image_xy(self, event: tk.Event) -> tuple[float, float]:
+        """Per-event canvas->image conversion for the annotation session.
+
+        Scroll-aware, float precision, UNCLAMPED — out-of-image points pass
+        through; clipping happens at render time (2026-06-10 design).
+        """
+        cx = self.canvas.canvasx(event.x)  # type: ignore[no-untyped-call]
+        cy = self.canvas.canvasy(event.y)  # type: ignore[no-untyped-call]
+        return canvas_point_to_image_xy_f(
+            (float(cx), float(cy)),
+            (self._display_width, self._display_height),
+            (self.canvas.winfo_width(), self.canvas.winfo_height()),
+            self.zoom,
+        )
+
+    def set_preview_shape(
+        self,
+        kind: Literal["polyline", "line", "arrow", "rect", "ellipse"],
+        points: Sequence[tuple[float, float]],
+        color: str,
+        width_px: float,
+    ) -> None:
+        """Draw/replace the single transient drag-preview Tk item.
+
+        AIDEV-NOTE: points are IMAGE-space floats (the session's source of
+        truth), converted through image_xy_to_canvas_point HERE so callers
+        never hold canvas coords (which go stale on zoom/pan/resize). Only the
+        in-flight drag uses a Tk item — Tk items cannot do per-item alpha —
+        and it is swapped for the exact PIL render at release.
+        """
+        self.clear_preview()
+        disp = (self._display_width, self._display_height)
+        csize = (self.canvas.winfo_width(), self.canvas.winfo_height())
+        pts = [image_xy_to_canvas_point(p, disp, csize, self.zoom) for p in points]
+        if len(pts) == 1:
+            pts = pts * 2  # create_line needs two points; a click previews a dot
+        flat = [coord for point in pts for coord in point]
+        width = max(1, round(width_px * self.zoom))
+        if kind in ("polyline", "line", "arrow"):
+            # Head sized to mirror annotation_render.arrow_head's length rule.
+            head = max(3.0 * width_px, 8.0) * self.zoom
+            arrow: Literal["last", ""] = "last" if kind == "arrow" else ""
+            self._preview_id = self.canvas.create_line(
+                flat,
+                fill=color,
+                width=width,
+                arrow=arrow,  # type: ignore[arg-type]
+                arrowshape=(head, head, head / 2),
+            )
+        elif kind == "rect":
+            self._preview_id = self.canvas.create_rectangle(flat, outline=color, width=width)
+        else:
+            self._preview_id = self.canvas.create_oval(flat, outline=color, width=width)
+
+    def clear_preview(self) -> None:
+        """Remove the transient drag-preview item, if any."""
+        if self._preview_id is not None:
+            self.canvas.delete(self._preview_id)
+            self._preview_id = None
+
+    def set_selection_marker(self, bbox: tuple[float, float, float, float] | None) -> None:
+        """Show (or clear with None) the Select tool's dashed selection marker.
+
+        AIDEV-NOTE: bbox is IMAGE-space (x0, y0, x1, y1) — the shape's source
+        of truth. The Tk item is re-derived inside display() on every
+        re-render, so zoom/pan/resize can never strand it at stale coords.
+        """
+        self._marker_bbox = bbox
+        self._redraw_selection_marker()
+
+    def _redraw_selection_marker(self) -> None:
+        """(Re)create the marker item from the stored image-space bbox."""
+        if self._marker_id is not None:
+            self.canvas.delete(self._marker_id)
+            self._marker_id = None
+        if self._marker_bbox is None:
+            return
+        disp = (self._display_width, self._display_height)
+        csize = (self.canvas.winfo_width(), self.canvas.winfo_height())
+        x0, y0 = image_xy_to_canvas_point(
+            (self._marker_bbox[0], self._marker_bbox[1]), disp, csize, self.zoom
+        )
+        x1, y1 = image_xy_to_canvas_point(
+            (self._marker_bbox[2], self._marker_bbox[3]), disp, csize, self.zoom
+        )
+        self._marker_id = self.canvas.create_rectangle(
+            x0 - _MARKER_PAD,
+            y0 - _MARKER_PAD,
+            x1 + _MARKER_PAD,
+            y1 + _MARKER_PAD,
+            outline="#ffffff",
+            dash=(4, 4),
+            width=1,
+        )
+
+    def image_xy_to_screen(self, xy: tuple[float, float]) -> tuple[int, int]:
+        """Image-space point -> absolute SCREEN coords (text-popup placement).
+
+        AIDEV-NOTE: Canvas coords live in scrollregion space; subtracting
+        canvasx/y(0) converts to widget space (scroll-aware), and the widget's
+        root position lifts that to screen space. The result goes stale on any
+        zoom/pan/resize — the caller (the text popup) is CANCELLED on view
+        changes, never repositioned (2026-06-10 design).
+        """
+        cx, cy = image_xy_to_canvas_point(
+            xy,
+            (self._display_width, self._display_height),
+            (self.canvas.winfo_width(), self.canvas.winfo_height()),
+            self.zoom,
+        )
+        wx = cx - self.canvas.canvasx(0)  # type: ignore[no-untyped-call]
+        wy = cy - self.canvas.canvasy(0)  # type: ignore[no-untyped-call]
+        return (self.canvas.winfo_rootx() + int(wx), self.canvas.winfo_rooty() + int(wy))
+
+    def set_annotation_cursor(self, tool: str) -> None:
+        """Per-tool draw-mode cursor (see _TOOL_CURSORS); pencil is the default.
+
+        Takes the palette's tool name (a PaletteTool value) as a plain str so
+        this module never imports the palette — the AnnotationSession Protocol
+        exists for the same reason. A no-op while disarmed, so a late
+        tool-change callback can never repaint the cursor after the session
+        ended.
+        """
+        if self._annotation_session is not None:
+            self.canvas.config(cursor=_TOOL_CURSORS.get(tool, "pencil"))
+
     def zoom_normal(self) -> None:
         self.zoom = 1.0
 
@@ -263,6 +502,13 @@ class CanvasView:
         # PxvApp.restore_main_focus). A real click means the main window is
         # gaining focus anyway, so cooperative focus_set suffices here.
         self.canvas.focus_set()
+        # AIDEV-NOTE: Draw mode multiplexes ahead of pick mode and the rubber
+        # band — the session consumes the whole press/drag/release stream.
+        # cmd_annotate and cmd_enhancement_dialog gate each other, so pick
+        # mode and a session can never be armed at once.
+        if self._annotation_session is not None:
+            self._annotation_session.on_press(self._event_image_xy(event))
+            return
         # AIDEV-NOTE: Pick mode consumes this click entirely — no rubber band,
         # one shot, then auto-disarm (cursor restored) before delivering,
         # coords via _canvas_xy so picks stay correct on a scrolled view.
@@ -282,6 +528,9 @@ class CanvasView:
         self._rb_start = self._canvas_xy(event)
 
     def _on_drag(self, event: tk.Event) -> None:
+        if self._annotation_session is not None:
+            self._annotation_session.on_drag(self._event_image_xy(event))
+            return
         if self._rb_start is None:
             return
         x0, y0 = self._rb_start
@@ -294,6 +543,9 @@ class CanvasView:
             self.canvas.coords(self._rubber_band_id, x0, y0, x1, y1)
 
     def _on_release(self, event: tk.Event) -> None:
+        if self._annotation_session is not None:
+            self._annotation_session.on_release(self._event_image_xy(event))
+            return
         if self._rb_start is None:
             return
         x0, y0 = self._rb_start
@@ -308,8 +560,30 @@ class CanvasView:
         # Normalize: ensure x1 > x0, y1 > y0
         self._selection = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
+    def _on_double_click(self, event: tk.Event) -> None:
+        """Second press of a double-click (replaces the plain press — see _bind_mouse)."""
+        if self._annotation_session is not None:
+            self._annotation_session.on_double_click(self._event_image_xy(event))
+            return
+        # No session: delegate to the plain press so pre-draw-mode behavior
+        # (the second press restarting the rubber band) is unchanged.
+        self._on_press(event)
+
     def _on_mouse_wheel(self, event: tk.Event) -> str | None:
         """Pan the view with the scroll wheel (Shift = horizontal)."""
+        if self._annotation_session is not None:
+            # AIDEV-NOTE: The wheel is pxv's only pan input; a view change
+            # mid-drag would shear the stroke, so wheel events are ignored
+            # while an annotation drag is in flight (zoom KEYS are consumed
+            # in commands.py; per-event coordinate conversion remains as
+            # defense in depth).
+            if self._annotation_session.is_dragging:
+                return "break"
+            # A pan is a view change with NO re-render behind it, so the
+            # composite chokepoint (app._composite_annotations) never sees it
+            # — notify the session so an open text popup (screen-positioned)
+            # is dismissed, not stranded (2026-06-10 design).
+            self._annotation_session.on_view_scrolled()
         num = getattr(event, "num", 0)
         if num == 4:  # X11 scroll up
             delta = -1

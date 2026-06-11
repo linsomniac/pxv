@@ -14,6 +14,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from pxv import commands
+from pxv.annotation_render import render_overlay
 from pxv.canvas_view import CanvasView
 from pxv.context_menu import ContextMenu
 from pxv.enhancements import EnhancementParams
@@ -25,6 +26,12 @@ from pxv.slideshow import DEFAULT_SLIDESHOW_SECONDS, adjusted_interval_ms, inter
 from pxv.thumbnails import ThumbnailCache
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from PIL import Image
+
+    from pxv.annotation_palette import AnnotationPalette
+    from pxv.annotations import Shape
     from pxv.enhancement_dialog import EnhancementDialog
     from pxv.info_dialog import InfoDialog
     from pxv.thumbnail_browser import BrowserWindow
@@ -98,6 +105,13 @@ class PxvApp:
         self.enhancement_dialog: EnhancementDialog | None = None
         # Will be set if the info / EXIF dialog is open
         self.info_dialog: InfoDialog | None = None
+        # Will be set if the drawing palette (draw mode) is open
+        self.annotation_palette: AnnotationPalette | None = None
+        # AIDEV-NOTE: Annotation-specific dirty flag (2026-06-10 design) — set
+        # on the first shape and on bake; cleared by a successful save, a
+        # confirmed discard prompt, and load_current. Other edits keep pxv's
+        # historical silent-discard behavior.
+        self.annotations_unsaved: bool = False
         # AIDEV-NOTE: The Visual Schnauzer thumbnail browser (a non-modal Toplevel).
         # Held here so commands/load_current can drive it; None when closed.
         self.browser: BrowserWindow | None = None
@@ -138,6 +152,9 @@ class PxvApp:
 
         self._bind_keys()
         self._bind_configure()
+        # AIDEV-NOTE: The titlebar close button otherwise bypasses cmd_quit —
+        # and with it the unsaved-annotations prompt — entirely.
+        root.protocol("WM_DELETE_WINDOW", lambda: commands.cmd_quit(self))
 
     def _get_decoration_size(self) -> tuple[int, int]:
         """Measure window decoration overhead (borders + title bar).
@@ -178,13 +195,21 @@ class PxvApp:
         self.root.bind("<less>", lambda _: commands.cmd_zoom_halve(self))
         self.root.bind("<Key-M>", lambda _: commands.cmd_zoom_max(self))
         self.root.bind("<Key-D>", lambda _: commands.cmd_toggle_background(self))
+        self.root.bind("<Key-d>", lambda _: commands.cmd_annotate(self))
+        # AIDEV-NOTE: 1-8 select drawing tools, gated to draw-mode-active here
+        # (the palette mirrors them for when IT holds focus); inert otherwise.
+        for digit in "12345678":
+            self.root.bind(f"<Key-{digit}>", self._on_tool_key)
         self.root.bind("<Key-t>", lambda _: commands.cmd_rotate(self, 270))
         self.root.bind("<Key-T>", lambda _: commands.cmd_rotate(self, 90))
         self.root.bind("<Control-s>", lambda _: commands.cmd_save_as(self))
         self.root.bind("<space>", lambda _: commands.cmd_next_image(self))
         self.root.bind("<Right>", lambda _: commands.cmd_next_image(self))
-        self.root.bind("<BackSpace>", lambda _: commands.cmd_prev_image(self))
+        # AIDEV-NOTE: BackSpace doubles as delete-with-selection in draw mode
+        # (the Left arrow stays pure navigation); Delete is draw-mode only.
+        self.root.bind("<BackSpace>", lambda _: commands.cmd_backspace(self))
         self.root.bind("<Left>", lambda _: commands.cmd_prev_image(self))
+        self.root.bind("<Delete>", lambda _: commands.cmd_delete(self))
         self.root.bind("<Escape>", lambda _: commands.cmd_escape(self))
         self.root.bind("<question>", lambda _: commands.cmd_help(self))
         self.root.bind("<Key-i>", lambda _: commands.cmd_info(self))
@@ -201,6 +226,11 @@ class PxvApp:
         """Debounced handler for window resize events."""
         self.canvas_view.canvas.bind("<Configure>", self._on_configure)
 
+    def _on_tool_key(self, event: tk.Event) -> None:
+        """Root-level tool hotkeys (1-8): forwarded only while draw mode is active."""
+        if self.annotation_palette is not None:
+            self.annotation_palette.select_tool_key(event.char)
+
     def _on_configure(self, _event: tk.Event) -> None:
         if self._resizing_programmatically:
             return
@@ -216,6 +246,7 @@ class PxvApp:
             # subsequent crop would target the wrong region. Every other mutating
             # path clears the selection; this one must too.
             self.canvas_view.clear_selection()
+            self.canvas_view.clear_preview()
             self._update_display()
 
     def _on_right_click(self, event: tk.Event) -> None:
@@ -264,6 +295,7 @@ class PxvApp:
         self.enhancement_params.reset()
         # AIDEV-NOTE: A freshly loaded image starts with empty undo/redo history.
         self.history.clear()
+        self.annotations_unsaved = False
         if self.enhancement_dialog is not None:
             self.enhancement_dialog.sync_sliders_from_params()
         if self.info_dialog is not None:
@@ -329,6 +361,35 @@ class PxvApp:
         if snap is not None:
             self.history.record(snap)
 
+    # --- annotations (draw mode) -----------------------------------------
+
+    def bake_annotations(self, shapes: Sequence[Shape]) -> None:
+        """Rasterize shapes into the image pixels as ONE undoable edit.
+
+        The crop/rotate command pattern: snapshot, mutate, refresh. An empty
+        layer exits silently with no history snapshot (checked up front, so
+        autocrop's conditional-snapshot dance is not needed).
+
+        AIDEV-NOTE: The bake composites onto the PRE-enhancement working
+        image, while the preview composited onto the post-enhancement display
+        — parity holds exactly when EnhancementParams is identity (the common
+        case). With live non-identity params the annotation pixels become
+        subject to the enhancement pass from here on: colors visibly shift at
+        Done and in the saved file. Accepted in the 2026-06-10 design — do
+        NOT "fix" this by inverse-mapping colors.
+        """
+        working = self.image_model.working_image
+        if working is None or not shapes:
+            return
+        # AIDEV-NOTE: Render FIRST so a render failure never leaves a dead no-op
+        # undo entry; record_history only after a successful render (2026-06-10
+        # ordering).
+        overlay = render_overlay(shapes, working.size, 1.0)
+        self.record_history()
+        self.image_model.apply_overlay(overlay)
+        self.annotations_unsaved = True
+        self.refresh_display()
+
     def undo(self) -> None:
         if not self.history.can_undo:
             self.show_temp_title("pxv: nothing to undo")
@@ -371,6 +432,35 @@ class PxvApp:
         """
         return EnhancementParams() if self._compare_active else self.enhancement_params
 
+    def _composite_annotations(self, display_img: Image.Image | None) -> Image.Image | None:
+        """Composite the live annotation overlay onto a fresh display render.
+
+        AIDEV-NOTE: The ONE composite hook shared by refresh_display and
+        _update_display — without the resize path, shapes would vanish on
+        window resize. Only the rendered overlay is cached (in the palette,
+        keyed on (layer.revision, target_size, scale)); the composite happens fresh
+        every call because the base changes under the same key (enhancement
+        debounce, Compare, background toggle). Also the stale-image guard's
+        first checkpoint: never composite against a replaced image.
+        """
+        palette = self.annotation_palette
+        if display_img is None or palette is None:
+            return display_img
+        # AIDEV-NOTE: Every display re-render is a view change as far as the
+        # text-entry popup is concerned — its screen position derived from
+        # canvas coords that are now stale (zoom/resize/background/restyle) —
+        # so it is dismissed here, the one chokepoint both display paths share
+        # (2026-06-10 design: zoom/navigation/Done/stale guard all cancel it).
+        palette.cancel_text_popup()
+        if not palette.layer.shapes:
+            return display_img
+        if not palette.image_is_current():
+            palette.cancel_stale()  # tears down + refreshes; skip the overlay
+            return display_img
+        overlay = palette.render_display_overlay(display_img.size, self.canvas_view.zoom)
+        display_img.paste(overlay, (0, 0), overlay)
+        return display_img
+
     def refresh_display(self) -> None:
         """Re-render the image with current zoom and enhancement params."""
         display_img = self.image_model.get_display_image(
@@ -378,6 +468,7 @@ class PxvApp:
             params=self._active_params(),
             bg_color=self._bg_color(),
         )
+        display_img = self._composite_annotations(display_img)
         if display_img is not None:
             # AIDEV-NOTE: Resize window BEFORE display() so the canvas has correct
             # dimensions when centering the image. Skipped in fullscreen, where the
@@ -409,6 +500,7 @@ class PxvApp:
             params=self._active_params(),
             bg_color=self._bg_color(),
         )
+        display_img = self._composite_annotations(display_img)
         if display_img is not None:
             self.canvas_view.display(display_img)
         if self.enhancement_dialog is not None:
@@ -416,6 +508,13 @@ class PxvApp:
         self._update_title()
 
     def _update_title(self) -> None:
+        # AIDEV-NOTE: Skip if a temp title is in flight (show_temp_title set
+        # _status_after_id). This lets stale-image cancel_stale() call
+        # show_temp_title BEFORE the outer refresh_display's trailing
+        # _update_title fires — without this guard the outer call would
+        # overwrite the stale message (2026-06-10 design).
+        if self._status_after_id is not None:
+            return
         path = self.image_model.current_path
         if path is not None:
             name = path.name

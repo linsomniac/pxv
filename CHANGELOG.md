@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
+## [Unreleased]
+
+### Added
+- Image annotations (draw mode): press `d` (or right-click → Draw / Annotate...)
+  for a tool palette with freehand, line, arrow, rectangle, ellipse,
+  highlighter, and text-label tools, plus a Select tool for moving, restyling,
+  and deleting placed shapes. Color swatches with a custom chooser,
+  thin/medium/thick size presets that scale with the image, a fill toggle, an
+  opacity slider, and in-mode undo/redo. Shapes stay editable vectors during
+  the session and bake into the image as a single undoable edit on Done;
+  annotations survive alpha-preserving saves of transparent images, and
+  navigating or quitting with unsaved annotation work prompts first.
+
 ## [1.0.5] - 2026-06-10
 
 ### Added
@@ -124,7 +137,9 @@ Initial release. Core features: crop, autocrop, save, resize, rotate, maxpect
 (zoom to fill display), and forward/back navigation across multiple images
 given on the command line.
 
-[Unreleased]: https://github.com/linsomniac/pxv/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/linsomniac/pxv/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/linsomniac/pxv/compare/v1.0.4...v1.0.5
+[1.0.4]: https://github.com/linsomniac/pxv/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/linsomniac/pxv/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/linsomniac/pxv/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/linsomniac/pxv/compare/v1.0.0...v1.0.1
