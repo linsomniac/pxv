@@ -846,17 +846,21 @@ def test_selection_marker_rederived_on_display_and_cleared_on_disarm() -> None:
         root.destroy()
 
 
-def test_annotation_cursor_switches_arrow_for_select() -> None:
+def test_annotation_cursor_per_tool() -> None:
     root = tk.Tk()
     try:
         view = _canvas_view(root)
-        view.set_annotation_cursor(True)  # disarmed: a no-op
+        view.set_annotation_cursor("select")  # disarmed: a no-op
         assert view.canvas.cget("cursor") == "crosshair"
         view.set_annotation_session(_RecordingSession())
-        view.set_annotation_cursor(True)
+        view.set_annotation_cursor("select")
         assert view.canvas.cget("cursor") == ""  # the default arrow
-        view.set_annotation_cursor(False)
+        view.set_annotation_cursor("text")
+        assert view.canvas.cget("cursor") == "xterm"  # I-beam: click-to-type surface
+        view.set_annotation_cursor("freehand")
         assert view.canvas.cget("cursor") == "pencil"
+        view.set_annotation_cursor("highlight")
+        assert view.canvas.cget("cursor") == "pencil"  # unlisted tools fall back
     finally:
         root.destroy()
 
@@ -1601,6 +1605,21 @@ def test_double_click_with_drawing_tool_is_a_fast_second_press(tmp_path) -> None
         palette.on_release((45.0, 5.0))
         (shape,) = palette.layer.shapes
         assert shape.points == ((5.0, 5.0), (25.0, 5.0), (45.0, 5.0))
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_text_tool_key_shows_ibeam_cursor(tmp_path) -> None:  # noqa: ANN001
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        assert app.canvas_view.canvas.cget("cursor") == "xterm"
+        palette.select_tool_key("1")
+        assert app.canvas_view.canvas.cget("cursor") == ""  # Select: arrow
+        palette.select_tool_key("7")
+        assert app.canvas_view.canvas.cget("cursor") == "pencil"  # drawing tools
         palette._end_session(bake=False)
     finally:
         root.destroy()

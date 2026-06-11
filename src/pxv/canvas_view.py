@@ -122,6 +122,12 @@ def image_xy_to_canvas_point(
 # zero-height bbox (a horizontal line, a 2-point shape) still reads as a box.
 _MARKER_PAD = 3.0
 
+# Per-tool draw-mode cursors, keyed by the palette's tool name. The Select
+# tool gets the platform default arrow and the text tool an I-beam over its
+# click-to-type surface; anything else (all six drawing tools) falls back to
+# the pencil. xterm/pencil are in Tk's portable cursor set.
+_TOOL_CURSORS: dict[str, str] = {"select": "", "text": "xterm"}
+
 
 class AnnotationSession(Protocol):
     """What CanvasView needs from the draw-mode session (the palette).
@@ -441,14 +447,17 @@ class CanvasView:
         wy = cy - self.canvas.canvasy(0)  # type: ignore[no-untyped-call]
         return (self.canvas.winfo_rootx() + int(wx), self.canvas.winfo_rooty() + int(wy))
 
-    def set_annotation_cursor(self, select_tool: bool) -> None:
-        """Default arrow for the Select tool, pencil for the drawing tools.
+    def set_annotation_cursor(self, tool: str) -> None:
+        """Per-tool draw-mode cursor (see _TOOL_CURSORS); pencil is the default.
 
-        A no-op while disarmed, so a late tool-change callback can never
-        repaint the cursor after the session ended.
+        Takes the palette's tool name (a PaletteTool value) as a plain str so
+        this module never imports the palette — the AnnotationSession Protocol
+        exists for the same reason. A no-op while disarmed, so a late
+        tool-change callback can never repaint the cursor after the session
+        ended.
         """
         if self._annotation_session is not None:
-            self.canvas.config(cursor="" if select_tool else "pencil")
+            self.canvas.config(cursor=_TOOL_CURSORS.get(tool, "pencil"))
 
     def zoom_normal(self) -> None:
         self.zoom = 1.0

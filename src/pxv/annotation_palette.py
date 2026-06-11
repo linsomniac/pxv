@@ -260,8 +260,8 @@ class AnnotationPalette(tk.Toplevel):
         self._update_canvas_cursor()
 
     def _update_canvas_cursor(self) -> None:
-        """Arrow for Select, pencil for drawing tools (no-op once disarmed)."""
-        self.app.canvas_view.set_annotation_cursor(self.tool == "select")
+        """Per-tool canvas cursor — arrow/I-beam/pencil (no-op once disarmed)."""
+        self.app.canvas_view.set_annotation_cursor(self.tool)
 
     def set_color(self, color: str) -> None:
         """Set the '#rrggbb' color for new shapes; restyle the selection live."""
