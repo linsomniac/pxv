@@ -1674,6 +1674,13 @@ def test_full_session_end_to_end_bake_save_reload(tmp_path, monkeypatch) -> None
         assert palette.layer.shapes[1].points == ((60.0, 20.0), (90.0, 40.0))
 
         # Text label (tool 8) at the top left, committed through the popup.
+        # Cancel any pending _handle_resize timer BEFORE opening the popup:
+        # _handle_resize → _composite_annotations → cancel_text_popup would
+        # kill the popup if the timer fires inside the root.update() below.
+        root.update()
+        if app._configure_after_id is not None:
+            root.after_cancel(app._configure_after_id)
+            app._configure_after_id = None
         palette.select_tool_key("8")
         palette.on_press((10.0, 10.0))
         root.update()
