@@ -1457,3 +1457,61 @@ def test_escape_cancels_popup_before_anything_else(tmp_path) -> None:  # noqa: A
         palette._end_session(bake=False)
     finally:
         root.destroy()
+
+
+def test_popup_real_key_bindings_return_places_escape_cancels(tmp_path) -> None:  # noqa: ANN001
+    """event_generate drives the REAL entry.bind(<Return>/<Escape>) wires.
+
+    A dropped entry.bind line fails this test — the programmatic _on_text_popup_*
+    calls in other tests would still pass, but this pins the actual Tk bindings.
+    """
+    app, root, _ = _make_app(tmp_path)
+    try:
+        palette = _open_palette(app)
+        palette.select_tool_key("8")
+        palette.on_press((20.0, 30.0))
+        root.update()
+        entry = palette._text_entry
+        assert entry is not None
+        entry.focus_force()
+        root.update()
+        entry.insert(0, "hello")
+        entry.event_generate("<Return>")
+        root.update()
+        assert palette._text_popup is None  # Return closed the popup
+        assert len(palette.layer.shapes) == 1
+        assert palette.layer.shapes[0].text == "hello"
+        # Re-open: Escape should cancel without placing a shape.
+        palette.on_press((40.0, 30.0))
+        root.update()
+        entry2 = palette._text_entry
+        assert entry2 is not None
+        entry2.focus_force()
+        root.update()
+        entry2.insert(0, "never")
+        entry2.event_generate("<Escape>")
+        root.update()
+        assert palette._text_popup is None  # Escape closed the popup
+        assert len(palette.layer.shapes) == 1  # no second shape
+        palette._end_session(bake=False)
+    finally:
+        root.destroy()
+
+
+def test_image_xy_to_screen_accounts_for_scroll() -> None:
+    """image_xy_to_screen shifts when the canvas is scrolled."""
+    root = tk.Tk()
+    try:
+        view = _canvas_view(root)
+        # Get the unscrolled screen position of image point (50, 50).
+        sx0, sy0 = view.image_xy_to_screen((50.0, 50.0))
+        # Set up a scrollregion and scroll 50 px to the right.
+        view.canvas.config(scrollregion=(0, 0, 600, 600), xscrollincrement=1)
+        view.canvas.xview_scroll(50, "units")
+        root.update()
+        sx1, sy1 = view.image_xy_to_screen((50.0, 50.0))
+        # Scrolling right 50 px shifts the screen X leftward by 50 px.
+        assert sx1 == sx0 - 50
+        assert sy1 == sy0  # vertical position unchanged
+    finally:
+        root.destroy()

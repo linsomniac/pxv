@@ -335,18 +335,21 @@ class AnnotationPalette(tk.Toplevel):
         if self.tool == "select":
             self._select_press(image_xy)
             return
+        # AIDEV-NOTE: Re-anchor to the current image if the session is empty and
+        # the image was swapped since open — drawing on the new image is safe
+        # because nothing was drawn on the old one, and this prevents the first
+        # shape from being instantly discarded by cancel_stale. This applies to
+        # BOTH the text tool and freehand/shape tools: a text label placed on a
+        # stale empty session would otherwise be discarded by cancel_stale at
+        # the next composite.
+        if not self.layer.shapes and not self.image_is_current():
+            self._session_image = self.app.image_model.working_image
         if self.tool == "text":
             # A click opens the entry popup; a click on an EXISTING label
             # starts a new overlapping label (re-editing is Select-double-click
             # only, 2026-06-10 design). No drag state: text is a click.
             self._open_text_popup(image_xy, edit_index=None)
             return
-        # AIDEV-NOTE: Re-anchor to the current image if the session is empty and
-        # the image was swapped since open — drawing on the new image is safe
-        # because nothing was drawn on the old one, and this prevents the first
-        # shape from being instantly discarded by cancel_stale.
-        if not self.layer.shapes and not self.image_is_current():
-            self._session_image = self.app.image_model.working_image
         self._drag_points = [image_xy]
 
     def on_drag(self, image_xy: tuple[float, float]) -> None:
@@ -539,8 +542,7 @@ class AnnotationPalette(tk.Toplevel):
         (replace), Escape (on_escape and the popup's own binding), every
         display re-render (app._composite_annotations — zoom/resize/restyle),
         a wheel pan (on_view_scrolled — the one view change with no re-render
-        behind it), and _end_session (Done/Cancel/navigation/stale guard) —
-        the latter call sites land in the next task.
+        behind it), and _end_session (Done/Cancel/navigation/stale guard).
         """
         popup = self._text_popup
         self._text_popup = None
