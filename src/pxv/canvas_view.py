@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from PIL import ImageTk
 
+from pxv.annotation_render import arrow_head_length
+
 if TYPE_CHECKING:
     from PIL import Image
 
@@ -372,8 +374,9 @@ class CanvasView:
         flat = [coord for point in pts for coord in point]
         width = max(1, round(width_px * self.zoom))
         if kind in ("polyline", "line", "arrow"):
-            # Head sized to mirror annotation_render.arrow_head's length rule.
-            head = max(3.0 * width_px, 8.0) * self.zoom
+            # Head sized by annotation_render's rule so the Tk preview's
+            # arrowhead (and Tk's line-shortening into it) matches the bake.
+            head = arrow_head_length(width_px) * self.zoom
             arrow: Literal["last", ""] = "last" if kind == "arrow" else ""
             self._preview_id = self.canvas.create_line(
                 flat,

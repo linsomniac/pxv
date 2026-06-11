@@ -142,6 +142,52 @@ def test_arrow_renders_filled_head() -> None:
     assert overlay.getpixel((5, 12))[3] == 0  # beside the shaft, before the head
 
 
+def test_arrow_shaft_stops_at_head_base_so_tip_is_pointed() -> None:
+    # width 4 -> head length 12: tip (36,20), base midpoint (24,20). A shaft
+    # drawn all the way to the tip squares it off with its 4px butt end cap.
+    s = Shape(tool="arrow", points=((4.0, 20.0), (36.0, 20.0)), color="#ff0000", width_px=4.0)
+    overlay = render_overlay([s], (40, 40), 1.0)
+    # Near the tip only the ~1px-tall head apex may paint, not the 4px shaft.
+    assert overlay.getpixel((35, 19))[3] == 0
+    assert overlay.getpixel((35, 22))[3] == 0
+    assert overlay.getpixel((35, 20))[3] > 0  # the apex itself still reaches x=35
+    assert overlay.getpixel((10, 20))[3] > 0  # shaft present along the body
+    # No seam where the shaft meets the head base (x=24).
+    assert overlay.getpixel((23, 20))[3] > 0
+    assert overlay.getpixel((24, 20))[3] > 0
+    assert overlay.getpixel((25, 20))[3] > 0
+
+
+def test_arrow_shorter_than_head_draws_head_only() -> None:
+    # Length 2 < head length 12: the shaft would either blunt the tip or point
+    # backwards past the base, so it is skipped entirely.
+    s = Shape(tool="arrow", points=((24.0, 20.0), (26.0, 20.0)), color="#ff0000", width_px=4.0)
+    overlay = render_overlay([s], (40, 40), 1.0)
+    assert overlay.getpixel((24, 22))[3] == 0  # old shaft corner below the taper
+    assert overlay.getpixel((25, 22))[3] == 0
+    assert overlay.getpixel((20, 20))[3] > 0  # head interior still filled
+    assert overlay.getpixel((13, 20))[3] == 0  # nothing pokes behind the base
+
+
+def test_arrow_shaft_threshold_is_image_space_at_any_scale() -> None:
+    # Length 20 > head 12 in IMAGE space, but only 10 target px at scale 0.5:
+    # the shaft must still draw — the threshold compares image-space lengths,
+    # or a zoomed-out preview would diverge from the bake (preview == bake is
+    # the module's core invariant).
+    s = Shape(tool="arrow", points=((4.0, 20.0), (24.0, 20.0)), color="#ff0000", width_px=4.0)
+    half = render_overlay([s], (20, 20), 0.5)
+    # Shaft pixel between p0 (2,10) and the head base (6,10); transparent if
+    # the comparison is (wrongly) made in target space.
+    assert half.getpixel((4, 10))[3] > 0
+    # And the head-only branch holds at scale != 1: a length-2 arrow stays
+    # head-only at 2x, with no shaft corner beside the taper.
+    short = Shape(tool="arrow", points=((24.0, 20.0), (26.0, 20.0)), color="#ff0000", width_px=4.0)
+    double = render_overlay([short], (80, 80), 2.0)
+    assert double.getpixel((50, 44))[3] == 0  # (25,22) at 2x: old shaft corner
+    assert double.getpixel((40, 40))[3] > 0  # head interior
+    assert double.getpixel((26, 40))[3] == 0  # nothing behind the base
+
+
 def test_text_renders_pixels() -> None:
     s = Shape(
         tool="text",

@@ -22,17 +22,24 @@ HIGHLIGHT_WIDTH_FACTOR = 4.0
 HIGHLIGHT_ALPHA_FACTOR = 0.4
 
 
+def arrow_head_length(width_px: float) -> float:
+    """Head length in image px for a given stroke width — single source so the
+    shaft-shortening in _draw_shape and the Tk drag preview's arrowshape
+    (canvas_view.set_preview_shape) can never drift from arrow_head itself."""
+    return max(3.0 * width_px, 8.0)
+
+
 def arrow_head(
     p0: tuple[float, float], p1: tuple[float, float], width_px: float
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     """Filled triangular head at p1: (tip, base_left, base_right), image coords.
 
-    Length max(3.0 * width_px, 8.0) image px, oriented along p0 -> p1; the
+    Length arrow_head_length(width_px) image px, oriented along p0 -> p1; the
     base is as wide as the head is long. Pure geometry, unit-testable.
     base_left/base_right follow y-up math convention (visually flipped in
     y-down image coords — harmless for a filled polygon).
     """
-    length = max(3.0 * width_px, 8.0)
+    length = arrow_head_length(width_px)
     dx, dy = p1[0] - p0[0], p1[1] - p0[1]
     norm = math.hypot(dx, dy)
     if norm == 0.0:
@@ -126,10 +133,28 @@ def _draw_shape(draw: ImageDraw.ImageDraw, shape: Shape, scale: float) -> None:
         draw.line(pts, fill=ink, width=_stroke_width(shape.width_px, scale), joint="curve")
     elif shape.tool == "arrow":
         ink = _rgba(shape.color, shape.opacity)
-        draw.line(pts, fill=ink, width=_stroke_width(shape.width_px, scale), joint="curve")
         # Head computed in IMAGE space (its length is in image px), then scaled,
         # so preview and bake heads are geometrically equivalent.
-        head = arrow_head(shape.points[0], shape.points[-1], shape.width_px)
+        p0, p1 = shape.points[0], shape.points[-1]
+        head = arrow_head(p0, p1, shape.width_px)
+        # AIDEV-NOTE: The shaft stops at the head's BASE midpoint, never the
+        # tip — a full-length shaft's square butt cap pokes out around the
+        # taper and blunts the point (2026-06-11 mac report). Arrows shorter
+        # than the head get no shaft at all (it would extend backwards). The
+        # length comparison stays in IMAGE space so preview == bake at any zoom
+        # (pinned by test_arrow_shaft_threshold_is_image_space_at_any_scale).
+        if math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > arrow_head_length(shape.width_px):
+            base_left, base_right = head[1], head[2]
+            base_mid = (
+                (base_left[0] + base_right[0]) / 2.0,
+                (base_left[1] + base_right[1]) / 2.0,
+            )
+            draw.line(
+                _scaled([p0, base_mid], scale),
+                fill=ink,
+                width=_stroke_width(shape.width_px, scale),
+                joint="curve",
+            )
         draw.polygon(_scaled(head, scale), fill=ink)
     elif shape.tool == "highlight":
         ink = _rgba(shape.color, HIGHLIGHT_ALPHA_FACTOR * shape.opacity)
